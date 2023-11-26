@@ -1,0 +1,12 @@
+[Unit]
+Description=Wizarr
+After=network-online.target
+
+[Service]
+Type=exec
+ExecStart=/wizarr/scripts/no-docker/start.sh
+Restart=on-failure
+TimeoutStopSec=300
+
+[Install]
+WantedBy=multi-user.target
