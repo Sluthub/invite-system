@@ -6,13 +6,13 @@
         <!-- Hero Section -->
         <section class="bg-gray-100 dark:bg-gray-900 px-2 md:px-4 lg:px-6 xl:px-8 mt-28 md:mt-0">
             <div class="py-8 px-4 mx-auto max-w-screen-xl text-center lg:py-16">
-                <h1 class="mb-4 text-4xl font-extrabold tracking-tight leading-none text-gray-900 md:text-5xl lg:text-6xl dark:text-white">{{ __("Welcome to") }} Wizarr</h1>
+                <h1 class="mb-4 text-4xl font-extrabold tracking-tight leading-none text-gray-900 md:text-5xl lg:text-6xl dark:text-white">{{ __("Welcome to") }} Sluthub</h1>
                 <p class="mb-8 text-lg font-normal text-gray-500 sm:px-16 lg:px-48 dark:text-gray-400">
-                    {{ __("Wizarr is a software tool that provides advanced user invitation and management capabilities for media servers such as Jellyfin, Emby, and Plex. With Wizarr, server administrators can easily invite new users and manage their access") }}
+                    {{ __("Sluthub is your favorite Media Server. Allowing you to watch any Movie, TV show or Anime you want, whenever you wish to do so. No strings attached. You can even request new titles to be added!") }}
                 </p>
 
                 <p class="mb-8 text-sm font-bold text-gray-500 sm:px-16 lg:px-48 dark:text-gray-400">
-                    {{ __("If you were sent here by a friend, please request access or if you have an invite code, please click Get Started!") }}
+                    {{ __("If you were sent here by a friend, please request access or if you have an invite code, please click Get started!") }}
                 </p>
                 <div class="flex flex-col space-y-2 sm:flex-row sm:justify-center sm:space-y-0 sm:space-x-3">
                     <FormKit type="button" @click="$router.push('/join')" theme="primary" suffix-icon="fas fa-arrow-right">{{ __("Get Started") }}</FormKit>

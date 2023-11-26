@@ -109,7 +109,7 @@ export default defineComponent({
 
         // Blue "Top Contributors" text
         console.log("%cTop Contributors", "color: #2196f3; font-size: 1.5rem; font-weight: bold;");
-        console.log("%cThank you for supporting Wizarr!", "color: #2196f3; font-size: 1.2em; font-weight: bold;");
+        console.log("%cThank you for supporting the Sluthub invite-system!", "color: #2196f3; font-size: 1.2em; font-weight: bold;");
 
         // Console log the contributors with the most recent at the top and color
         Object.entries(sorted).forEach(([index, contributor]) => {

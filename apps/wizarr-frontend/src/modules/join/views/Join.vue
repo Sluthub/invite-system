@@ -38,17 +38,6 @@
                 </div>
             </div>
         </section>
-        <div class="flex justify-center items-center flex-col mb-3 space-y-6">
-            <p class="text-sm text-center text-gray-900 dark:text-white">
-                {{ __('Made by ') }}
-                <a
-                    class="text-primary font-bold hover:underline"
-                    target="_blank"
-                    href="https://github.com/wizarrrr/wizarr"
-                    >Wizarr</a
-                >
-            </p>
-        </div>
     </div>
 </template>
 

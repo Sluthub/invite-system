@@ -4,7 +4,7 @@
             <div class="flex flex-col space-y-2">
                 <div class="flex flex-col space-y-3">
                     <p class="text-sm leading-tight tracking-tight text-gray-900 md:text-sm dark:text-gray-400">
-                        {{ __("Configure Wizarr to display a dynamic Discord Widget to users onboarding after signup.") }}
+                        {{ __("Configure the Sluthub invite-system to display a dynamic Discord Widget to users onboarding after signup.") }}
                     </p>
                     <p class="text-xs font-semibold leading-tight tracking-tight text-gray-900 md:text-sm dark:text-gray-400">
                         {{ __("Please enter your Discord Server ID below and ensure Server Widgets are enabled. If you don't know how to get your Discord Server ID or Enable Widgets, please follow the instructions below.") }}

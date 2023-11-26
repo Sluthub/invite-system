@@ -43,7 +43,7 @@ export default defineComponent({
             const confirm = await this.$modal.confirmModal(
                 this.__('Plex Warning'),
                 this.__(
-                    'Wizarr is an unverified app. This means that Plex may warn you about using it. Do you wish to continue?',
+                    'The Sluthub invite-system is an unverified app. This means that Plex may warn you about using it. Do you wish to continue?',
                 ),
                 { confirmButtonText: this.__('Okay') },
             );

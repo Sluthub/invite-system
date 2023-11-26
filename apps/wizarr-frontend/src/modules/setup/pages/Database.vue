@@ -10,7 +10,7 @@
         >
             {{
                 __(
-                    "Currently Wizarr only supports it's internal SQLite database.",
+                    "Currently the Sluthub invite-system only supports it's internal SQLite database.",
                 )
             }}
             <br />

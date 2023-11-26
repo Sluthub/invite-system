@@ -137,7 +137,7 @@ export default defineComponent({
     },
     async mounted() {
         this.$nextTick(() => {
-            this.$toast.info('Welcome to Wizarr!');
+            this.$toast.info('Welcome to the Sluthub invite-system!');
         });
 
         const response = await this.$axios

@@ -3,7 +3,7 @@
         <div class="max-w-screen-xl flex flex-wrap items-center justify-between mx-auto p-4">
             <router-link to="/" class="flex items-center">
                 <WizarrLogo class="mr-3" rounded />
-                <span class="self-center text-2xl font-semibold whitespace-nowrap dark:text-white">Wizarr</span>
+                <span class="self-center text-2xl font-semibold whitespace-nowrap dark:text-white">Sluthub invite-system</span>
             </router-link>
             <div class="flex md:order-2">
                 <DefaultButton :to="buttonLink" size="sm">
@@ -31,7 +31,7 @@ export default defineComponent({
     props: {
         title: {
             type: String,
-            default: "Wizarr",
+            default: "Sluthub invite-system",
         },
         button: {
             type: String,

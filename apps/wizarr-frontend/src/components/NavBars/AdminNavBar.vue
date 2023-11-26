@@ -5,7 +5,7 @@
             <div class="flex md:order-2 text-center justify-between w-full md:w-min">
                 <router-link to="/" class="flex items-center">
                     <WizarrLogo class="mr-3" rounded />
-                    <span class="self-center text-2xl font-semibold whitespace-nowrap dark:text-white">Wizarr</span>
+                    <span class="self-center text-2xl font-semibold whitespace-nowrap dark:text-white">Sluthub invite-system</span>
                 </router-link>
                 <button data-collapse-toggle="navbar-default" aria-controls="navbar-default" aria-expanded="false" type="button" class="text-gray-500 dark:text-gray-400 focus:outline-none block md:hidden" @click="expanded = !expanded">
                     <i class="fa-solid fa-md fa-xl fa-bars"></i>

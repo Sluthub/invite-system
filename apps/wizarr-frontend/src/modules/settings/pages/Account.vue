@@ -5,15 +5,15 @@
         <FormKit type="form" :disabled="true" @submit="saveAccount" :submit-label="__('Save Account')" :submit-attrs="{ wrapperClass: 'flex justify-end' }">
             <!-- Name -->
             <div class="flex flex-row flex-wrap gap-2">
-                <FormKit type="text" name="firstName" :value="firstName" :label="__('First name')" :placeholder="__('Marvin')" :classes="{ outer: 'flex-grow' }" />
-                <FormKit type="text" name="lastName" :value="lastName" :label="__('Last name')" :placeholder="__('Martian')" :classes="{ outer: 'flex-grow' }" />
+                <FormKit type="text" name="firstName" :value="firstName" :label="__('First name')" :placeholder="__('Clara')" :classes="{ outer: 'flex-grow' }" />
+                <FormKit type="text" name="lastName" :value="lastName" :label="__('Last name')" :placeholder="__('Crazy')" :classes="{ outer: 'flex-grow' }" />
             </div>
 
             <!-- Username -->
-            <FormKit type="text" name="username" :value="user?.username" :label="__('Username')" :placeholder="__('marvin')" />
+            <FormKit type="text" name="username" :value="user?.username" :label="__('Username')" :placeholder="__('kinky_whore')" />
 
             <!-- Email -->
-            <FormKit type="email" name="email" :value="user?.email" :label="__('Email')" :placeholder="__('marvin@wizarr.dev')" />
+            <FormKit type="email" name="email" :value="user?.email" :label="__('Email')" :placeholder="__('whore@sluthub.is')" />
         </FormKit>
     </div>
 </template>

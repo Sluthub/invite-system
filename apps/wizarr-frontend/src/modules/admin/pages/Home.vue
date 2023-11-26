@@ -1,7 +1,7 @@
 <template>
     <AdminTemplate
         :header="__('Home')"
-        :subheader="__('Manage you Wizarr server')"
+        :subheader="__('Manage the Sluthub invite-system')"
         :box-view="boxView"
     >
         <template #header>
