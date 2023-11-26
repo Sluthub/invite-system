@@ -16,3 +16,4 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now nginx
 sudo systemctl reload nginx
 sudo systemctl enable --now wizarr
+# Connect on port 5690 of your IP. Either use cloudflare tunnels or reconfigure nginx to port 443/80 to avoid that
