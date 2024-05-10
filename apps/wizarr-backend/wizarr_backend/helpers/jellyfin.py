@@ -25,7 +25,6 @@ from app.models.jellyfin.library import JellyfinLibraryItem
 # - Jellyfin Delete User
 # - Jellyfin Sync Users
 
-
 # ANCHOR - Jellyfin Get Request
 def get_jellyfin(api_path: str, as_json: Optional[bool] = True, server_api_key: Optional[str] = None, server_url: Optional[str] = None):
     """Get data from Jellyfin.
@@ -260,12 +259,32 @@ def invite_jellyfin_user(username: str, password: str, code: str, server_api_key
     user_response = post_jellyfin(api_path="/Users/New", json=new_user, server_api_key=server_api_key, server_url=server_url)
 
     # Create policy object
-    new_policy = { "EnableAllFolders": True, "MaxActiveSessions": 2 }
+    new_policy = {
+        "EnableAllFolders": True,
+        "MaxActiveSessions": 0,
+        "EnableLiveTvAccess": False,
+        "EnableLiveTvManagement": False,
+        "AuthenticationProviderId": "Jellyfin.Server.Implementations.Users.DefaultAuthenticationProvider",
+    }
 
+    # Set library options
     if sections:
         new_policy["EnableAllFolders"] = False
         new_policy["EnabledFolders"] = sections
 
+    # Set session limit options
+    if invitation.sessions is not None and int(invitation.sessions) > 0:
+        new_policy["MaxActiveSessions"] = int(invitation.sessions)
+
+    # Set live tv access
+    if invitation.live_tv is not None and invitation.live_tv == True:
+        new_policy["EnableLiveTvAccess"] = True
+
+    # Set the hidden user status
+    if invitation.hide_user is not None and invitation.hide_user == False:
+        new_policy["IsHidden"] = False
+
+    # Get users default policy
     old_policy = user_response["Policy"]
 
     # Merge policy with user policy don't overwrite
@@ -359,7 +378,6 @@ def sync_jellyfin_users(server_api_key: Optional[str] = None, server_url: Option
     # Get users from Jellyfin
     jellyfin_users = get_jellyfin_users(server_api_key=server_api_key, server_url=server_url)
 
-
     # Get users from database
     database_users = get_users(False)
 
@@ -369,63 +387,17 @@ def sync_jellyfin_users(server_api_key: Optional[str] = None, server_url: Option
             create_user(username=jellyfin_user["Name"], token=jellyfin_user["Id"])
             info(f"User {jellyfin_user['Name']} successfully imported to database.")
 
+        # If database_users.token in jellyfin_users.id, update the users name in database
+        else:
+            user = get_user_by_token(jellyfin_user["Id"], verify=False)
+
+            if (jellyfin_user["Name"] != user.username):
+                user.username = jellyfin_user["Name"]
+                user.save()
+                info(f"User {jellyfin_user['Name']} successfully updated in database.")
+
     # If database_users.token not in jellyfin_users.id, delete from database
     for database_user in database_users:
         if str(database_user.token) not in [str(jellyfin_user["Id"]) for jellyfin_user in jellyfin_users]:
             database_user.delete_instance()
             info(f"User {database_user.username} successfully deleted from database.")
-
-
-
-# ANCHOR - Jellyfin Get Profile Picture
-def get_jellyfin_profile_picture(user_id: str, max_height: Optional[int] = 150, max_width: Optional[int] = 150, quality: Optional[int] = 30, server_api_key: Optional[str] = None, server_url: Optional[str] = None):
-    """Get profile picture from Jellyfin.
-
-    :param user_id: ID of the user to get profile picture for
-    :type user_id: str
-
-    :param username: Username for backup profile picture using ui-avatars.com
-    :type username: str
-
-    :param max_height: Maximum height of profile picture
-    :type max_height: Optional[int] - Default: 150
-
-    :param max_width: Maximum width of profile picture
-    :type max_width: Optional[int] - Default: 150
-
-    :param quality: Quality of profile picture
-    :type quality: Optional[int] - Default: 30
-
-    :param server_api_key: Jellyfin API key
-    :type server_api_key: Optional[str] - If not provided, will get from database.
-
-    :param server_url: Jellyfin URL
-    :type server_url: Optional[str] - If not provided, will get from database.
-
-    :return: Jellyfin API response
-    """
-
-    # Response object
-    response = None
-
-    try:
-        # Get profile picture from Jellyfin
-        response = get_jellyfin(api_path=f"/Users/{user_id}/Images/Primary?maxHeight={max_height}&maxWidth={max_width}&quality={quality}", as_json=False, server_api_key=server_api_key, server_url=server_url)
-    except RequestException:
-        # Backup profile picture using ui-avatars.com if Jellyfin fails
-        user = get_user_by_token(user_id, verify=False)
-        username = f"{user.username}&length=1" if user else "ERROR&length=60&font-size=0.28"
-        response = get(url=f"https://ui-avatars.com/api/?uppercase=true&name={username}", timeout=30)
-
-    # Raise exception if either Jellyfin or ui-avatars.com fails
-    if response.status_code != 200:
-        raise RequestException("Failed to get profile picture.")
-
-    # Extract image from response
-    image = response.content
-
-    # Convert image bytes to read image
-    image = BytesIO(image)
-
-    # Return profile picture
-    return image

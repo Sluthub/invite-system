@@ -21,7 +21,6 @@ from app.models.database.libraries import Libraries
 # - Plex Get User
 # - Plex Delete User
 # - Plex Sync Users
-# - Plex Get Profile Picture
 
 # ANCHOR - Get Plex Server
 def get_plex_server(server_api_key: Optional[str] = None, server_url: Optional[str] = None) -> PlexServer:
@@ -109,18 +108,14 @@ def invite_plex_user(code: str, token: str, server_api_key: Optional[str] = None
     if invitation.specific_libraries is not None and len(invitation.specific_libraries) > 0:
         sections = [library.name for library in Libraries.filter(Libraries.id.in_(invitation.specific_libraries.split(",")))]
 
-    # Get allow_sync and plex_home from invitation
+    # Get allow_sync from invitation
     allow_sync = invitation.plex_allow_sync
-    plex_home = invitation.plex_home
 
     # Get my account from Plex
     my_account = plex.myPlexAccount()
 
     # Get the user from the token
     plex_account = MyPlexAccount(token=token)
-
-    # Select invitation method
-    invite_method = my_account.createHomeUser if plex_home else my_account.inviteFriend
 
     invite_data = {
         "user": plex_account.email,
@@ -132,7 +127,7 @@ def invite_plex_user(code: str, token: str, server_api_key: Optional[str] = None
         invite_data["sections"] = sections
 
     # Invite the user
-    invite = invite_method(**invite_data)
+    invite = my_account.inviteFriend(**invite_data)
 
     # If the invite is none raise an error
     if invite is None:
@@ -284,57 +279,20 @@ def sync_plex_users(server_api_key: Optional[str] = None, server_url: Optional[s
     # If plex_users.id is not in database_users.token, add user to database
     for plex_user in plex_users:
         if str(plex_user.id) not in [str(database_user.token) for database_user in database_users]:
-            create_user(username=plex_user.username, token=plex_user.id, email=plex_user.email)
-            info(f"User {plex_user.username} successfully imported to database")
+            create_user(username=plex_user.title, token=plex_user.id, email=plex_user.email)
+            info(f"User {plex_user.title} successfully imported to database")
 
+        # Handle Plex Managed/Guest users.
+        # Update DB username to Plex user title.
+        # This value is the same as username for normal accounts.
+        # For managed accounts without a public username,
+        # this value is set to 'Guest' or local username
+        elif str(plex_user.username) == "" and plex_user.email is None:
+            create_user(username=plex_user.title, token=plex_user.id, email=plex_user.email)
+            info(f"Managed User {plex_user.title} successfully updated to database")
 
     # If database_users.token is not in plex_users.id, remove user from database
     for database_user in database_users:
         if str(database_user.token) not in [str(plex_user.id) for plex_user in plex_users]:
             database_user.delete_instance()
             info(f"User {database_user.username} successfully removed from database")
-
-
-# ANCHOR - Plex Get Profile Picture
-def get_plex_profile_picture(user_id: str, server_api_key: Optional[str] = None, server_url: Optional[str] = None) -> str:
-    """Get a Plex user's profile picture
-
-    :param user_id: The id of the user
-    :type user_id: str - [usernames, email, id]
-
-    :param server_api_key: The API key of the Plex server
-    :type server_api_key: Optional[str] - If not provided, will get from database.
-
-    :param server_url: The URL of the Plex server
-    :type server_url: Optional[str] - If not provided, will get from database.
-
-    :return: str - The url of the profile picture
-    """
-
-    # Response object
-    response = None
-
-    # Get the user
-    user = get_plex_user(user_id=user_id, server_api_key=server_api_key, server_url=server_url)
-
-    try:
-        # Get the profile picture from Plex
-        url = user.thumb
-        response = get(url=url, timeout=30)
-    except RequestException:
-        # Backup profile picture using ui-avatars.com if Jellyfin fails
-        username = f"{user.username}&length=1" if user else "ERROR&length=60&font-size=0.28"
-        response = get(url=f"https://ui-avatars.com/api/?uppercase=true&name={username}", timeout=30)
-
-    # Raise exception if either Jellyfin or ui-avatars.com fails
-    if response.status_code != 200:
-        raise RequestException("Failed to get profile picture.")
-
-    # Extract image from response
-    image = response.content
-
-    # Convert image bytes to read image
-    image = BytesIO(image)
-
-    # Return profile picture
-    return image
