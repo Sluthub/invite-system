@@ -4,9 +4,9 @@
         <!-- Hero Section -->
         <section class="bg-gray-100 dark:bg-gray-900 px-2 md:px-4 lg:px-6 xl:px-8 mt-28 md:mt-0">
             <div class="py-8 px-4 mx-auto max-w-screen-xl text-center lg:py-16">
-                <h1 class="mb-4 text-4xl font-extrabold tracking-tight leading-none text-gray-900 md:text-5xl lg:text-6xl dark:text-white">{{ __("Welcome to") }} Sluthub</h1>
+                <h1 class="mb-4 text-4xl font-extrabold tracking-tight leading-none text-gray-900 md:text-5xl lg:text-6xl dark:text-white">{{ __("Welcome to") }} The Screening Room</h1>
                 <p class="mb-8 text-lg font-normal text-gray-500 sm:px-16 lg:px-48 dark:text-gray-400">
-                    {{ __("Sluthub is your favorite Media Server. Allowing you to watch any Movie, TV show or Anime you want, whenever you wish to do so. No strings attached. You can even request new titles to be added!") }}
+                    {{ __("The Screening Room is your favorite Media Server. Allowing you to watch any Movie, TV show or Anime you want, whenever you wish to do so. No strings attached. You can even request new titles to be added!") }}
                 </p>
 
                 <p class="mb-8 text-sm font-bold text-gray-500 sm:px-16 lg:px-48 dark:text-gray-400">
