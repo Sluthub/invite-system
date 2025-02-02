@@ -1,4 +1,4 @@
-<h1 align="center">Wizarr</h1>
+<h1 align="center">The Room</h1>
 <h3 align="center">The Free Media Invitation System</h3>
 
 ---
