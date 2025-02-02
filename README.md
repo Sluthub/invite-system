@@ -2,7 +2,7 @@
 <h3 align="center">The Free Media Invitation System</h3>
 
 ---
-
+ 
 
 <p align="center">
 <img src="https://raw.githubusercontent.com/Wizarrrr/wizarr/master/apps/wizarr-frontend/src/assets/img/wizard.png" height="200">
