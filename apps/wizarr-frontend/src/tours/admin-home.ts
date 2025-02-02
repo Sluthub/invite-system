@@ -5,7 +5,7 @@ import { TourGuideStep } from "@sjmc11/tourguidejs/src/types/TourGuideStep";
 
 const steps = (__: (key: string) => string): TourGuideStep[] => [
     {
-        title: __("Welcome to the Sluthub invite-system"),
+        title: __("Welcome to the Screening Room"),
         content: __("We want to help you get started with Wizarr as quickly as possible, consider following this tour to get a quick overview."),
     },
     {
