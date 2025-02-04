@@ -25,6 +25,36 @@ jobs:
       # Checkout the repository
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      # Set up Node.js and install dependencies
+      - name: Use Node.js 18.18.2
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18.18.2
+
+      - name: Install dependencies
+        run: npm install
+
+      # Set up Python and install Poetry
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install Poetry
+        run: |
+          pip install poetry==1.6.1
+          poetry config virtualenvs.create false
+
+      # Build the repository using NX
+      - name: Build Backend
+        run: npx nx build wizarr-backend
+
+      - name: Build Frontend
+        run: npx nx build wizarr-frontend
 
       # Set up Docker Buildx
       - name: Set up Docker Buildx
@@ -38,13 +68,14 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Build and push image
+      # Build and push Docker image
       - name: Build and push image
         uses: docker/build-push-action@v5
         with:
           context: .
           file: ./dockerfiles/wizarr-ci/Dockerfile
           push: true
+          platforms: linux/amd64,linux/arm64  # Multi-architecture support
           tags: |
             ${{ env.GHCR_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ inputs.tag }}
             ${{ env.GHCR_REGISTRY }}/${{ env.IMAGE_NAME }}:latest
