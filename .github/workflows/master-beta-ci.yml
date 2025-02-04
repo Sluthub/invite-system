@@ -14,7 +14,7 @@ permissions:
 
 env:
   GHCR_REGISTRY: ghcr.io
-  IMAGE_NAME: alexjyong/wizarr
+  IMAGE_NAME: ${{ github.repository_owner}}/wizarr
 
 jobs:
   build_and_push:
