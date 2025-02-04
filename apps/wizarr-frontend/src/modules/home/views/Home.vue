@@ -1,21 +1,37 @@
 <template>
     <DefaultNavBar :button="isAuthenticated ? 'Admin Dashboard' : 'Admin Login'" :buttonLink="isAuthenticated ? '/admin' : '/login'" />
 
-        <!-- Hero Section -->
-        <section class="bg-gray-100 dark:bg-gray-900 px-2 md:px-4 lg:px-6 xl:px-8 mt-28 md:mt-0">
-            <div class="py-8 px-4 mx-auto max-w-screen-xl text-center lg:py-16">
-                <h1 class="mb-4 text-4xl font-extrabold tracking-tight leading-none text-gray-900 md:text-5xl lg:text-6xl dark:text-white">{{ __("Welcome to") }} The Screening Room</h1>
-                <p class="mb-8 text-lg font-normal text-gray-500 sm:px-16 lg:px-48 dark:text-gray-400">
-                    {{ __("The Screening Room is your favorite Media Server. Allowing you to watch any Movie, TV show or Anime you want, whenever you wish to do so. No strings attached. You can even request new titles to be added!") }}
-                </p>
-
-                <p class="mb-8 text-sm font-bold text-gray-500 sm:px-16 lg:px-48 dark:text-gray-400">
-                    {{ __("If you were sent here by a friend, please request access or if you have an invite code, please click Get started!") }}
-                </p>
-                <div class="flex flex-col space-y-2 sm:flex-row sm:justify-center sm:space-y-0 sm:space-x-3">
-                    <FormKit type="button" @click="$router.push('/join')" theme="primary" suffix-icon="fas fa-arrow-right">{{ __("Get Started") }}</FormKit>
-                    <span class="inline-flex items-center text-gray-500 dark:text-gray-400 justify-center"> or </span>
-                    <FormKit type="button" :disabled="true" data-theme="transparent">{{ __("Request Access") }}</FormKit>
+    <div>
+        <div
+            class="flex justify-center items-center flex-col mt-12 mb-3 space-y-6"
+        >
+            <WizarrLogo rounded class="w-[150px] h-[150px]" />
+            <h1
+                class="text-2xl font-semibold text-center text-gray-900 dark:text-white"
+            >
+                {{
+                    __('Welcome to %{server_name}!', {
+                        server_name: settings.server_name
+                    })
+                }}
+            </h1>
+        </div>
+        <section>
+            <div
+                class="flex flex-col items-center justify-center md:container py-8 mx-auto"
+            >
+                <div
+                    class="w-full md:w-1/2 lg:w-1/3 bg-white rounded shadow dark:border dark:bg-gray-800 dark:border-gray-700 overflow-hidden"
+                >
+                    <div class="relative">
+                        <Carousel
+                            :views="views"
+                            :currentView="currentView"
+                            :pageTitle="pageTitle"
+                            :pleaseWait="pleaseWait"
+                            :stepper="activeStep"
+                        />
+                    </div>
                 </div>
             </div>
         </section>
