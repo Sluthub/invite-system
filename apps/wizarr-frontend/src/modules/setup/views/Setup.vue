@@ -135,11 +135,10 @@ export default defineComponent({
             },
         },
     },
-  },
-  async mounted() {
-    this.$nextTick(() => {
-      this.$toast.info("Welcome to the Screening Room!");
-    });
+    async mounted() {
+        this.$nextTick(() => {
+            this.$toast.info('Welcome to Wizarr!');
+        });
 
         const response = await this.$axios
             .get('/api/setup/status')
