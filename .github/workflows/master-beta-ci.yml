@@ -35,10 +35,7 @@ jobs:
         with:
           node-version: 18.18.2
 
-      - name: Install dependencies
-        run: npm install
-
-      # Set up Python and install Poetry
+        # Set up Python and install Poetry
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -48,6 +45,9 @@ jobs:
         run: |
           pip install poetry==1.6.1
           poetry config virtualenvs.create false
+
+      - name: Install dependencies
+        run: npm install
 
       # Build the repository using NX
       - name: Build Backend
