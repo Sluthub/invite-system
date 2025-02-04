@@ -13,7 +13,7 @@
         </h2>
       </div>
 
-      <hr class="my-4 border-gray-200 dark:border-gray-700" />
+            <hr class="my-4 border-gray-200 dark:border-gray-700" />
 
       <!-- Description -->
       <p class="text-base text-center">
@@ -22,13 +22,12 @@
         strings attached. You can even request new titles to be added!
       </p>
     </div>
-  </div>
 </template>
 
 <script lang="ts">
-import { defineComponent } from "vue";
+import { defineComponent } from 'vue';
 
 export default defineComponent({
-  name: "WelcomeView",
+    name: 'WelcomeView',
 });
 </script>
