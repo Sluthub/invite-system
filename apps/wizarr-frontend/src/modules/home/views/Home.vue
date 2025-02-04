@@ -31,7 +31,6 @@
                 </a>
             </p>
         </div>
-    </div>
 </template>
 
 <script lang="ts">
