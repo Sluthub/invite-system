@@ -1,58 +1,19 @@
-# See http://help.github.com/ignore-files/ for more about ignoring files.
 
-# compiled output
-dist
-tmp
-/out-tsc
+# .gitignore
+*.mo
+*.pot   # keep this out too; we generate it automatically
 
-# dependencies
-node_modules
 
-# IDEs and editors
-/.idea
-.project
-.classpath
-.c9/
-*.launch
-.settings/
-*.sublime-workspace
+CLAUDE.md
+.python-version
 
-github_token.txt
+idea/
 
-.env
-.venv
+.venv/
 
-**/__pycache__/
+LLM-Helper/
 
-/reports
-
-/dockerfiles/wizarr-backend/database
-/apps/wizarr-backend/database
-
-# IDE - VSCode
-.vscode/*
-!.vscode/settings.json
-!.vscode/tasks.json
-!.vscode/launch.json
-!.vscode/extensions.json
-
-**/.caches
-
-# misc
-/.sass-cache
-/connect.lock
-/coverage
-/libpeerconnection.log
-npm-debug.log
-yarn-error.log
-testem.log
-/typings
-
-# System Files
-.DS_Store
-Thumbs.db
-
-.nx/cache
+flask_session/
 
 venv/
 app/__pycache__/
@@ -61,16 +22,11 @@ __pycache__/
 .DS_Store
 .buildHelper.txt
 data/
-**/node_modules/
-testing/cypress/screenshots
-testing/cypress/videos
-docker/
-delete/
-*.backup
-swagger.json
-dev-dist
-.vite
-.nvmrc
+database/
+test-data/
+
+node_modules/
+
 
 # Created by https://www.toptal.com/developers/gitignore/api/pycharm,flask,python
 # Edit at https://www.toptal.com/developers/gitignore?templates=pycharm,flask,python
@@ -441,8 +397,6 @@ poetry.toml
 .ruff_cache/
 
 # End of https://www.toptal.com/developers/gitignore/api/pycharm,flask,python
-testing/core
-apps/wizarr-backend-next/
-apps/wizarr-backend-old/
-/apps/wizarr-backend/database/
-.sentryclirc
+
+PLANNING.md
+TASK.md

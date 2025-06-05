@@ -1,10 +1,5 @@
-**/tmp
-/dockerfiles/wizarr-backend/database
-/apps/wizarr-backend/database
-**/.venv
-**/__pycache__
-.DS_Store
 
+.venv
 venv/
 .env
 .DS_Store
@@ -12,7 +7,9 @@ venv/
 .git
 .idea
 .buildHelper.txt
-__pycache__
+test-data/
+# All hidden files
+.*
 
 Dockerfile
 README.md
@@ -21,6 +18,5 @@ unraid.xml
 
 screenshots/
 docs/
-testing/
-database/
-delete/
+helpers/
+

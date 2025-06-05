@@ -9,10 +9,11 @@
 
 ## 💭 Using Wizarr
 
-* [Custom HTML](using-wizarr/custom-html.md)
-* [Requests Integration](using-wizarr/requests-integration.md)
+* [Single-Sign-On (SSO)](using-wizarr/single-sign-on-sso.md)
+* [Discord Integration](using-wizarr/discord-integration.md)
+* [Customise The Wizard](using-wizarr/customise-steps.md)
 
-## ⛑ Support
+## ⛑️ Support
 
 * [Discord](support/discord.md)
 

@@ -10,12 +10,12 @@ We have recently updated from V2 to V3, this has many improvements and features 
 [View Documentation](https://github.com/Wizarrrr/wizarr/tree/v2)
 {% endhint %}
 
-### Docker
+### Docker&#x20;
 
 {% hint style="warning" %}
 Be sure to replace`/path/to/appdata/config` in the below examples with a valid host directory path. If this volume mount is not configured correctly, your Wizarr settings/data will not be persisted when the container is recreated (e.g., when updating the image or rebooting your machine).
 
-The `TZ` environment variable value should also be set to the [TZ database name](https://en.wikipedia.org/wiki/List\_of\_tz\_database\_time\_zones) of your time zone!
+The `TZ` environment variable value should also be set to the [TZ database name](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones) of your time zone!
 {% endhint %}
 
 {% tabs %}
@@ -26,7 +26,6 @@ Define the `wizarr` service in your `docker-compose.yml` as follows:
 
 ```yaml
 ---
-version: "3.8"
 services:
   wizarr:
     container_name: wizarr
@@ -34,7 +33,11 @@ services:
     ports:
       - 5690:5690
     volumes:
-      - /path/to/appdata/config:/data/database
+      - /path/to/appdata/config/database:/data/database
+      - /path/to/appdata/config/wizard:/data/wizard_steps
+    environment:
+      - DISABLE_BUILTIN_AUTH=false #Set to true ONLY if you are using another auth provider (Authelia, Authentik, etc)
+      - TZ=Europe/London #Set your timezone here
 ```
 
 Then, start all services defined in the Compose file:
@@ -57,8 +60,11 @@ Then, restart all services defined in the Compose file:
 
 <pre class="language-docker"><code class="lang-docker"><strong>docker run -d \
 </strong>  --name wizarr \
+  -e DISABLE_BUILTIN_AUTH=false \
+  -e TZ=Europe/London \
   -p 5690:5690 \
-  -v /path/to/appdata/config:/data/database \
+  -v /path/to/appdata/config/database:/data/database \
+  -v /path/to/appdata/config/wizard:/data/wizard_steps
   --restart unless-stopped \
   ghcr.io/wizarrrr/wizarr
 </code></pre>
