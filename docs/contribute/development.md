@@ -4,17 +4,15 @@ If you want to contribute to Wizarr, here is how
 
 ### Prerequisites
 
-* Python3.11+
+* [uv](https://docs.astral.sh/uv/)
+* Node.js/npm - [nvm](https://github.com/nvm-sh/nvm) recommended
 
 ### Development Environment
 
-1. Clone the repository with `git clone git@github.com:Wizarrrr/wizarr.git`
+1. Clone the repository with `git clone https://github.com/wizarrrr/wizarr.git`
 2. Move into the directory `cd wizarr`
-3. (Optional but recommended) Create a python virtual environment with `python -m venv venv`
-4. Enter the python venv with `source venv/bin/activate`
-5. Install dependencies with `uv sync --locked`
-6. Start Wizarr with `flask run`
-7. Wizarr is now accessible at http://127.0.0.1:5000
+3. Start Wizarr with `uv run dev.py`
+4. Wizarr is now accessible at http://127.0.0.1:5000
 
 ### Running Tests
 

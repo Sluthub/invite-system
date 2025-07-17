@@ -4,13 +4,9 @@ description: Install Wizarr using Docker or Compose
 
 # Installation
 
-{% hint style="info" %}
-We have recently updated from V2 to V3, this has many improvements and features however V2 will always be available, however we won't be able to provide updates and support for V2, to use V2 visit it below.
+## Installation
 
-[View Documentation](https://github.com/Wizarrrr/wizarr/tree/v2)
-{% endhint %}
-
-### Docker&#x20;
+#### Docker
 
 {% hint style="warning" %}
 Be sure to replace`/path/to/appdata/config` in the below examples with a valid host directory path. If this volume mount is not configured correctly, your Wizarr settings/data will not be persisted when the container is recreated (e.g., when updating the image or rebooting your machine).
@@ -34,8 +30,9 @@ services:
       - 5690:5690
     volumes:
       - /path/to/appdata/config/database:/data/database
-      - /path/to/appdata/config/wizard:/data/wizard_steps
     environment:
+      - PUID=1000 #Set UID
+      - PGID=1000 #Set GID
       - DISABLE_BUILTIN_AUTH=false #Set to true ONLY if you are using another auth provider (Authelia, Authentik, etc)
       - TZ=Europe/London #Set your timezone here
 ```
@@ -58,13 +55,13 @@ Then, restart all services defined in the Compose file:
 {% tab title="Docker CLI" %}
 **Installation**
 
-<pre class="language-docker"><code class="lang-docker"><strong>docker run -d \
+<pre class="language-bash"><code class="lang-bash"><strong>docker run -d \
 </strong>  --name wizarr \
   -e DISABLE_BUILTIN_AUTH=false \
+  -e PUID=1000 -e PGID=1000 \
   -e TZ=Europe/London \
   -p 5690:5690 \
   -v /path/to/appdata/config/database:/data/database \
-  -v /path/to/appdata/config/wizard:/data/wizard_steps
   --restart unless-stopped \
   ghcr.io/wizarrrr/wizarr
 </code></pre>
@@ -91,14 +88,46 @@ docker run -d ...
 {% endtab %}
 {% endtabs %}
 
-## Unraid
-
-{% hint style="warning" %}
-NOT IMPLEMENTED YET
-{% endhint %}
+### Unraid
 
 1. Ensure you have the **Community Applications** plugin installed.
 2. Inside the **Community Applications** app store, search for **Wizarr**.
 3. Click the **Install Button**.
 4. On the following **Add Container** screen, make changes to the **Host Port** and **Host Path 1**(Appdata) as needed, as well as the environment variables.
 5. Click apply and access "Wizarr" at your `<ServerIP:HostPort>` in a web browser.
+
+## TrueNas Fangtooth
+
+1.  Discover Apps
+
+    ![image](https://github.com/user-attachments/assets/a99db34b-34f8-423c-8a56-617c87bf4c6a)
+2.  Custom App
+
+    ![image](https://github.com/user-attachments/assets/43e9ee74-3430-4dd5-8a82-0907f9877262)
+3.  Quick install if you know what your doing.
+
+    ![image](https://github.com/user-attachments/assets/fae99bb7-ee49-49cf-a611-007074a9ab5e)
+
+_All other steps below are every single thing that needs to be changed. Also only things that need to be setup._
+
+4. Use only what is used in pictures following. Don't change anything unless you know what your doing. For storage locations make changes to match your setup.
+
+_Repository:_ [ghcr.io/wizarrrr/wizarr](ghcr.io/wizarrrr/wizarr/)
+
+![image](https://github.com/user-attachments/assets/e4a91eb3-58d8-4ab5-8f1c-fdb775b408a6)
+
+![image](https://github.com/user-attachments/assets/d44dec66-d520-4e2d-a6d3-6ea623c457c5)
+
+![image](https://github.com/user-attachments/assets/f8ebb365-7404-4417-af70-b0f81a1275ba)
+
+![image](https://github.com/user-attachments/assets/5888758f-4c4b-4756-b168-78647d5e6bd5)
+
+![image](https://github.com/user-attachments/assets/d4e05d81-8e49-418c-a86c-1804ed0f002d)
+
+![image](https://github.com/user-attachments/assets/c6737814-b871-46cd-900f-3a51e42bd4b9)
+
+![image](https://github.com/user-attachments/assets/27c6e67b-eabe-4d40-b237-400d237f634e)
+
+5.  Click Install
+
+    ![image](https://github.com/user-attachments/assets/41a7a6df-cb5d-4379-8272-f622ac837235)

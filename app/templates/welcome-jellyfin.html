@@ -8,7 +8,7 @@
 
 {% block main %}
 <section class="bg-white dark:bg-gray-900">
-    <div class="flex flex-col items-center justify-center px-6 mx-auto md:h-screen lg:py-0">
+    <div class="flex flex-col items-center justify-center px-6 mx-auto h-screen lg:py-0">
         <h1
             class="mb-4 text-2xl font-extrabold tracking-tight leading-none text-gray-900 md:text-3xl lg:text-4xl dark:text-white">
             🧙🏼‍♂️ {{ _("You've been invited to join the %(name)s server!", name=server_name) }}</h1>
@@ -25,7 +25,7 @@
                     <p class="mt-2 text-sm text-red-600 dark:text-red-500"><span class="font-medium">{{ error }}</span></p>
                     {% endif %}
 
-                    <form class="space-y-4 md:space-y-6" action="{% if server_type == 'emby' %}{{ url_for('emby.public_join') }}{% else %}{{ url_for('jellyfin.public_join') }}{% endif %}" method="POST">
+                    <form class="space-y-4 md:space-y-6" action="{{ url_for('public.process_invitation') }}" method="POST">
                         {{ form.hidden_tag() }}
 
                         <div>

@@ -35,12 +35,27 @@
   }
 }
 
+/*
+Set the default cursor for buttons.
+*/
+button,
+[role="button"] {
+  cursor: pointer;
+}
+
+/*
+Make sure disabled buttons don't get the pointer cursor.
+*/
+:disabled {
+  cursor: default;
+}
+
 .btn-nav{
   @apply inline-flex items-center px-4 py-2 text-sm font-medium
          bg-white text-gray-500 border border-gray-300 rounded-lg
          hover:bg-gray-100 hover:text-gray-700
          dark:bg-gray-800 dark:border-gray-700 dark:text-gray-400
-         dark:hover:bg-gray-700 dark:hover:text-white;
+         dark:hover:bg-gray-700 dark:hover:text-white cursor-default;
 }
 
 .tab-btn {
@@ -48,4 +63,75 @@
          rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600
          focus:outline-hidden focus:ring-2 focus:ring-primary
          text-gray-700 dark:text-gray-300;
+}
+
+/* Enhanced modal backdrop with blur */
+.modal-backdrop {
+  background: rgba(107, 114, 128, 0.75) !important;
+  backdrop-filter: blur(8px) !important;
+  -webkit-backdrop-filter: blur(8px) !important;
+  z-index: 2147483647 !important;
+}
+
+/* Ensure modals are always on top */
+.modal-container {
+  z-index: 2147483647 !important;
+  position: relative !important;
+}
+
+/* Additional fix for modal overlay issues */
+.modal-container > .fixed.inset-0 {
+  z-index: 2147483647 !important;
+}
+
+/* Force hide all other elements when modal is open */
+.modal-container ~ * {
+  z-index: 1 !important;
+}
+
+/* Mobile modal improvements for better scrolling */
+@media (max-width: 768px) {
+  .modal-container .fixed.inset-0 {
+    padding: 1rem 0.5rem;
+    display: flex;
+    align-items: flex-start;
+  }
+  
+  .modal-container .min-h-full {
+    min-height: auto;
+    max-height: calc(100vh - 2rem);
+    width: 100%;
+    margin: 0;
+  }
+  
+  .modal-container .transform {
+    max-height: calc(100vh - 2rem);
+    overflow-y: auto;
+    width: 100%;
+    margin: 0.5rem auto;
+  }
+  
+  /* Ensure modal content scrolls properly on mobile */
+  .modal-container .bg-white {
+    display: flex;
+    flex-direction: column;
+    max-height: inherit;
+  }
+  
+  /* Make form content scrollable if needed */
+  .modal-container .space-y-4,
+  .modal-container .space-y-6 {
+    overflow-y: auto;
+    flex: 1;
+  }
+  
+  /* Ensure action buttons stay at bottom */
+  .modal-container .bg-gray-50 {
+    margin-top: auto;
+    flex-shrink: 0;
+  }
+}
+
+#wizard-wrapper.htmx-added {
+  opacity: 0;
 }
