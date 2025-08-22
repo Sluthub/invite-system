@@ -1,18 +1,9 @@
 services:
-  wizarr:
-    container_name: wizarr
-    image: ghcr.io/wizarrrr/wizarr
-    #image: ghcr.io/wizarrrr/wizarr:arm64 #For Arm64
-    ports:
-    - 5690:5690
-    volumes:
-      - ./data:/data/database
-    environment:
-      - "APP_URL=https://join.domain.com"
-      - "DISABLE_INBUILT_AUTH=false" #Set to true ONLY if you are using another auth provider (Authelia, Authentik, etc)
-      
-  watchtower: #Optional but recommended, as Wizarr is still in development and will be updated frequently
-    image: containrrr/watchtower
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-    command: wizarr --interval 30
+    wizarr:
+        build: .
+        ports:
+            - 5690:5690
+        volumes:
+            - ./test-data:/data/database
+        environment:
+            - TZ=Europe/London
