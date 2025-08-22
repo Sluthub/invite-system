@@ -93,6 +93,9 @@ coverage.xml
 .pytest_cache/
 cover/
 
+# Translations
+*.mo
+*.pot
 
 # Django stuff:
 *.log
@@ -402,3 +405,6 @@ poetry.toml
 
 PLANNING.md
 TASK.md
+cookies.txt
+
+.serena/

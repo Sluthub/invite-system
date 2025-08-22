@@ -1,34 +1,73 @@
-# Start from the official Python 3.12 Alpine image
-FROM python:3.13-alpine
+# ─── Stage 1: Dependencies ───────────────────────────────────────────────
+FROM ghcr.io/astral-sh/uv:python3.13-alpine AS deps
+
+# Install system dependencies
+RUN apk add --no-cache nodejs npm
+
+# Set working directory
+WORKDIR /app
+
+# Enable bytecode compilation for faster startup
+ENV UV_COMPILE_BYTECODE=1
+
+# Use copy link mode to avoid warnings with cache mounts
+ENV UV_LINK_MODE=copy
+
+# Copy dependency files first for better caching
+COPY pyproject.toml uv.lock ./
+
+# Install Python dependencies only (not project) with cache mount for speed
+# Exclude dev dependencies for production image
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --locked --no-install-project --no-dev
+
+# Copy npm dependency files and install with cache
+COPY app/static/package*.json ./app/static/
+RUN npm --prefix app/static/ ci --cache /tmp/npm-cache
+
+# ─── Stage 2: Build assets ────────────────────────────────────────────────
+FROM deps AS builder
+
+# Copy source files needed for building
+COPY app/ ./app/
+COPY babel.cfg ./
+
+# Install the project now that we have source code
+# Exclude dev dependencies for production image
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --locked --no-dev
+
+# Build translations
+RUN uv run --no-dev pybabel compile -d app/translations
+
+# Ensure static directories exist and build static assets
+RUN mkdir -p app/static/js app/static/css && npm --prefix app/static/ run build
+
+# ─── Stage 3: Runtime ─────────────────────────────────────────────────────
+FROM ghcr.io/astral-sh/uv:python3.13-alpine
 
 # Set default environment variables for user/group IDs
 ENV PUID=1000
 ENV PGID=1000
 
-# Copy the UV binaries from the "astral-sh/uv" image
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+# Install runtime dependencies only
+RUN apk add --no-cache curl tzdata su-exec
 
-# Install curl (for the HEALTHCHECK), tzdata (if you need timezones), nodejs (for npm), and su-exec for user switching
-RUN apk add --no-cache curl tzdata nodejs npm su-exec
+# Set application working directory
+WORKDIR /app
 
-# ─── 2. Copy your application code ──────────────────────────────────────────
+# Copy Python environment from builder stage (includes project)
+COPY --chown=1000:1000 --from=builder /app/.venv /app/.venv
 
-# Set up the working directory for our code. We'll put everything under /data.
-WORKDIR /data
+# Copy application code and built assets
+COPY --chown=1000:1000 --from=builder /app/app /app/app
+COPY --chown=1000:1000 . /app
 
-# Copy your source as UID 1000/GID 1000 at build time,
-# so default users never need a runtime chown.
-COPY --chown=1000:1000 . /data
+# Create data directory for database (backward compatibility)
+RUN mkdir -p /data/database
 
-# ─── 3. Run your build steps (still as root) ───────────────────────────────
-
-# We run the build steps as root first, because installing packages
-# or building assets often needs root privileges.
-RUN uv sync --locked
-RUN uv run pybabel compile -d app/translations
-
-RUN npm --prefix app/static/ install
-RUN npm --prefix app/static/ run build
+# Create wizard steps config directory
+RUN mkdir -p /etc/wizarr/wizard_steps
 
 # Create directories that need to be writable
 RUN mkdir -p /.cache
@@ -54,10 +93,8 @@ RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 ENTRYPOINT ["docker-entrypoint.sh"]
 
 # By default we run Gunicorn under wizarruser
-CMD ["uv", "run", "gunicorn", \
+CMD ["uv", "run", "--no-dev", "gunicorn", \
      "--config", "gunicorn.conf.py", \
-     "--preload", \
-     "--workers", "4", \
      "--bind", "0.0.0.0:5690", \
      "--umask", "007", \
      "run:app"]

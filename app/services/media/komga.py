@@ -1,14 +1,17 @@
 import datetime
 import logging
 import re
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
+if TYPE_CHECKING:
+    from app.services.media.user_details import MediaUserDetails
+
+import requests
 from sqlalchemy import or_
 
 from app.extensions import db
 from app.models import Invitation, Library, User
-from app.services.invites import is_invite_valid, mark_server_used
-from app.services.notifications import notify
+from app.services.invites import is_invite_valid
 
 from .client_base import RestApiMixin, register_media_client
 
@@ -20,10 +23,8 @@ class KomgaClient(RestApiMixin):
     """Wrapper around the Komga REST API using credentials from Settings."""
 
     def __init__(self, *args, **kwargs):
-        if "url_key" not in kwargs:
-            kwargs["url_key"] = "server_url"
-        if "token_key" not in kwargs:
-            kwargs["token_key"] = "api_key"
+        kwargs.setdefault("url_key", "server_url")
+        kwargs.setdefault("token_key", "api_key")
         super().__init__(*args, **kwargs)
 
     def _headers(self) -> dict[str, str]:
@@ -54,22 +55,22 @@ class KomgaClient(RestApiMixin):
         Returns:
             dict: Library name -> library ID mapping
         """
-        import requests
+        try:
+            if url and token:
+                headers = {"Authorization": f"Bearer {token}"}
+                response = requests.get(
+                    f"{url.rstrip('/')}/api/v1/libraries", headers=headers, timeout=10
+                )
+                response.raise_for_status()
+                libraries = response.json()
+            else:
+                response = self.get("/api/v1/libraries")
+                libraries = response.json()
 
-        if url and token:
-            # Use override credentials for scanning
-            headers = {"Authorization": f"Bearer {token}"}
-            response = requests.get(
-                f"{url.rstrip('/')}/api/v1/libraries", headers=headers, timeout=10
-            )
-            response.raise_for_status()
-            libraries = response.json()
-        else:
-            # Use saved credentials
-            response = self.get("/api/v1/libraries")
-            libraries = response.json()
-
-        return {lib["name"]: lib["id"] for lib in libraries}
+            return {lib["name"]: lib["id"] for lib in libraries}
+        except Exception as exc:
+            logging.warning("Komga: failed to scan libraries – %s", exc)
+            return {}
 
     def create_user(self, username: str, password: str, email: str) -> str:
         """Create a new Komga user and return the user ID."""
@@ -87,9 +88,62 @@ class KomgaClient(RestApiMixin):
         self.delete(f"/api/v1/users/{user_id}")
 
     def get_user(self, user_id: str) -> dict[str, Any]:
-        """Get a Komga user by ID."""
+        """Get user info in legacy format for backward compatibility."""
+        details = self.get_user_details(user_id)
+        return {
+            "id": details.user_id,
+            "email": details.email,
+            "username": details.username,
+            "roles": ["ADMIN"] if details.is_admin else ["USER"],
+            "createdDate": details.created_at.isoformat() + "Z"
+            if details.created_at
+            else None,
+            "lastActiveDate": details.last_active.isoformat() + "Z"
+            if details.last_active
+            else None,
+        }
+
+    def get_user_details(self, user_id: str) -> "MediaUserDetails":
+        """Get detailed user information in standardized format."""
+        from app.models import Library
+        from app.services.media.user_details import MediaUserDetails, UserLibraryAccess
+
+        # Get raw user data from Komga API
         response = self.get(f"/api/v1/users/{user_id}")
-        return response.json()
+        raw_user = response.json()
+
+        # Get all available libraries for this server since Komga gives full access
+        libs_q = (
+            Library.query.filter_by(server_id=self.server_id, enabled=True)
+            .order_by(Library.name)
+            .all()
+        )
+        library_access = [
+            UserLibraryAccess(
+                library_id=lib.external_id, library_name=lib.name, has_access=True
+            )
+            for lib in libs_q
+        ]
+
+        return MediaUserDetails(
+            user_id=user_id,
+            username=raw_user.get("email", "Unknown"),  # Komga uses email as username
+            email=raw_user.get("email"),
+            is_admin="ADMIN" in raw_user.get("roles", []),
+            is_enabled=True,  # Komga doesn't have a disabled state in API
+            created_at=datetime.datetime.fromisoformat(
+                raw_user["createdDate"].rstrip("Z")
+            )
+            if raw_user.get("createdDate")
+            else None,
+            last_active=datetime.datetime.fromisoformat(
+                raw_user["lastActiveDate"].rstrip("Z")
+            )
+            if raw_user.get("lastActiveDate")
+            else None,
+            library_access=library_access,
+            raw_policies=raw_user,
+        )
 
     def list_users(self) -> list[User]:
         """Sync users from Komga into the local DB and return the list of User records."""
@@ -118,9 +172,18 @@ class KomgaClient(RestApiMixin):
                     db.session.delete(db_user)
             db.session.commit()
 
-            return User.query.filter(
+            # Get users with default policy information
+            users = User.query.filter(
                 User.server_id == getattr(self, "server_id", None)
             ).all()
+
+            # Add default policy attributes (Komga doesn't have specific download/live TV policies)
+            for user in users:
+                user.allow_downloads = True  # Default to True for reading apps
+                user.allow_live_tv = False  # Komga doesn't have Live TV
+                user.allow_sync = True  # Default to True for reading apps
+
+            return users
         except Exception as e:
             logging.error(f"Failed to list Komga users: {e}")
             return []
@@ -136,14 +199,14 @@ class KomgaClient(RestApiMixin):
         except Exception as e:
             logging.warning(f"Failed to set library access for user {user_id}: {e}")
 
-    def join(
+    def _do_join(
         self, username: str, password: str, confirm: str, email: str, code: str
     ) -> tuple[bool, str]:
         """Handle public sign-up via invite for Komga servers."""
         if not EMAIL_RE.fullmatch(email):
             return False, "Invalid e-mail address."
-        if not 8 <= len(password) <= 20:
-            return False, "Password must be 8–20 characters."
+        if not 8 <= len(password) <= 128:
+            return False, "Password must be 8–128 characters."
         if password != confirm:
             return False, "Passwords do not match."
 
@@ -180,12 +243,11 @@ class KomgaClient(RestApiMixin):
 
             self._set_library_access(user_id, library_ids)
 
-            expires = None
-            if inv and inv.duration:
-                days = int(inv.duration)
-                expires = datetime.datetime.utcnow() + datetime.timedelta(days=days)
+            from app.services.expiry import calculate_user_expiry
 
-            new_user = self._create_user_with_identity_linking(
+            expires = calculate_user_expiry(inv, current_server_id) if inv else None
+
+            self._create_user_with_identity_linking(
                 {
                     "username": username,
                     "email": email,
@@ -196,18 +258,6 @@ class KomgaClient(RestApiMixin):
                 }
             )
             db.session.commit()
-
-            if inv:
-                inv.used_by = new_user
-                server_id = getattr(new_user, "server_id", None)
-                if server_id is not None:
-                    mark_server_used(inv, server_id)
-
-            notify(
-                "New User",
-                f"User {username} has joined your server! 🎉",
-                tags="tada",
-            )
 
             return True, ""
 

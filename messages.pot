@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: PROJECT VERSION\n"
 "Report-Msgid-Bugs-To: EMAIL@ADDRESS\n"
-"POT-Creation-Date: 2025-07-17 04:06+0000\n"
+"POT-Creation-Date: 2025-08-22 03:47+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -17,42 +17,42 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Generated-By: Babel 2.17.0\n"
 
-#: app/blueprints/admin/routes.py:253
+#: app/blueprints/admin/routes.py:275
 #: app/templates/admin/user_details_modal.html:47
 msgid "Unknown"
 msgstr ""
 
-#: app/blueprints/admin/routes.py:256 app/templates/modals/invite.html:61
-#: app/templates/tables/invite_card.html:52
-#: app/templates/tables/invite_card.html:159
-#: app/templates/tables/user_card.html:71
+#: app/blueprints/admin/routes.py:278 app/templates/modals/invite.html:66
+#: app/templates/tables/invite_card.html:45
+#: app/templates/tables/invite_card.html:189
+#: app/templates/tables/user_card.html:74
 msgid "Never"
 msgstr ""
 
-#: app/blueprints/admin/routes.py:324 app/templates/tables/invite_card.html:39
+#: app/blueprints/admin/routes.py:349 app/templates/tables/invite_card.html:26
 msgid "Expired"
 msgstr ""
 
-#: app/blueprints/admin/routes.py:332
+#: app/blueprints/admin/routes.py:357
 #, python-format
 msgid "in %(n)d d"
 msgstr ""
 
-#: app/blueprints/admin/routes.py:334
+#: app/blueprints/admin/routes.py:359
 msgid "in 1 d"
 msgstr ""
 
-#: app/blueprints/admin/routes.py:336
+#: app/blueprints/admin/routes.py:361
 #, python-format
 msgid "in %(n)d h"
 msgstr ""
 
-#: app/blueprints/admin/routes.py:338
+#: app/blueprints/admin/routes.py:363
 #, python-format
 msgid "in %(n)d m"
 msgstr ""
 
-#: app/blueprints/admin/routes.py:339
+#: app/blueprints/admin/routes.py:364
 msgid "soon"
 msgstr ""
 
@@ -64,37 +64,106 @@ msgstr ""
 msgid "Admin updated"
 msgstr ""
 
-#: app/blueprints/auth/routes.py:62
+#: app/blueprints/admin_accounts/routes.py:166
+#, python-brace-format
+msgid "All passkeys for {} have been reset"
+msgstr ""
+
+#: app/blueprints/admin_accounts/routes.py:170
+#, python-brace-format
+msgid "Failed to reset passkeys for {}"
+msgstr ""
+
+#: app/blueprints/api_keys/routes.py:68
+msgid ""
+"API key created successfully. Please copy it now as it won't be shown "
+"again."
+msgstr ""
+
+#: app/blueprints/api_keys/routes.py:110
+msgid "API key deleted successfully"
+msgstr ""
+
+#: app/blueprints/auth/routes.py:85
 msgid "Invalid username or password"
 msgstr ""
 
-#: app/blueprints/settings/routes.py:166 app/blueprints/settings/routes.py:272
+#: app/blueprints/auth/routes.py:105
+msgid "No pending 2FA authentication"
+msgstr ""
+
+#: app/blueprints/auth/routes.py:119 app/templates/login.html:150
+#: app/templates/login.html:209 app/templates/login.html:213
+msgid "Authentication failed"
+msgstr ""
+
+#: app/blueprints/connections/routes.py:52
+#: app/blueprints/connections/routes.py:188
+msgid "Connection type is required"
+msgstr ""
+
+#: app/blueprints/connections/routes.py:65
+#, python-format
+msgid "Connection test failed: %(message)s"
+msgstr ""
+
+#: app/blueprints/connections/routes.py:75
+msgid "Connection test successful!"
+msgstr ""
+
+#: app/blueprints/connections/routes.py:78
+#: app/blueprints/connections/routes.py:204
+msgid "Unknown connection type"
+msgstr ""
+
+#: app/blueprints/connections/routes.py:95
+msgid "Connection created successfully!"
+msgstr ""
+
+#: app/blueprints/connections/routes.py:124
+msgid "Connection updated successfully!"
+msgstr ""
+
+#: app/blueprints/connections/routes.py:146
+msgid "Connection deleted successfully!"
+msgstr ""
+
+#: app/blueprints/connections/routes.py:165
+msgid "Please refresh the page and try again (CSRF token expired)"
+msgstr ""
+
+#: app/blueprints/connections/routes.py:170
+#, python-format
+msgid "Invalid form data: %(errors)s"
+msgstr ""
+
+#: app/blueprints/settings/routes.py:165 app/blueprints/settings/routes.py:270
 msgid "Settings saved successfully!"
 msgstr ""
 
-#: app/blueprints/settings/routes.py:217 app/forms/settings.py:23
+#: app/blueprints/settings/routes.py:216 app/forms/settings.py:24
 msgid "Server URL"
 msgstr ""
 
-#: app/blueprints/settings/routes.py:220 app/forms/settings.py:24
+#: app/blueprints/settings/routes.py:219 app/forms/settings.py:25
 msgid "API Key"
 msgstr ""
 
-#: app/blueprints/settings/routes.py:220
+#: app/blueprints/settings/routes.py:219
 msgid "Username/Password"
 msgstr ""
 
-#: app/blueprints/settings/routes.py:223
+#: app/blueprints/settings/routes.py:222
 #, python-brace-format
 msgid "Missing required fields: {fields}"
 msgstr ""
 
-#: app/blueprints/settings/routes.py:226 app/blueprints/settings/routes.py:236
+#: app/blueprints/settings/routes.py:225 app/blueprints/settings/routes.py:235
 #: app/templates/components/passkey_error.html:7
 msgid "Error"
 msgstr ""
 
-#: app/blueprints/settings/routes.py:235
+#: app/blueprints/settings/routes.py:234
 msgid "Library scan failed"
 msgstr ""
 
@@ -102,32 +171,50 @@ msgstr ""
 msgid "Admin account created – welcome!"
 msgstr ""
 
-#: app/blueprints/wizard_admin/routes.py:157
+#: app/blueprints/wizard_admin/routes.py:108
+#, python-brace-format
+msgid "Cleaned up {} orphaned step(s)"
+msgstr ""
+
+#: app/blueprints/wizard_admin/routes.py:173
 msgid "Step created"
 msgstr ""
 
-#: app/blueprints/wizard_admin/routes.py:205
+#: app/blueprints/wizard_admin/routes.py:246
+msgid "Preset step created successfully"
+msgstr ""
+
+#: app/blueprints/wizard_admin/routes.py:254
+#, python-brace-format
+msgid "Error creating preset: {}"
+msgstr ""
+
+#: app/blueprints/wizard_admin/routes.py:282
 msgid "Step updated"
 msgstr ""
 
-#: app/blueprints/wizard_admin/routes.py:243
+#: app/blueprints/wizard_admin/routes.py:320
 msgid "Step deleted"
 msgstr ""
 
-#: app/blueprints/wizard_admin/routes.py:313
+#: app/blueprints/wizard_admin/routes.py:390
 msgid "Bundle created"
 msgstr ""
 
-#: app/blueprints/wizard_admin/routes.py:336
+#: app/blueprints/wizard_admin/routes.py:420
 msgid "Bundle updated"
 msgstr ""
 
-#: app/blueprints/wizard_admin/routes.py:353
+#: app/blueprints/wizard_admin/routes.py:444
 msgid "Bundle deleted"
 msgstr ""
 
-#: app/blueprints/wizard_admin/routes.py:431
+#: app/blueprints/wizard_admin/routes.py:522
 msgid "Steps added"
+msgstr ""
+
+#: app/blueprints/wizard_admin/routes.py:534
+msgid "Orphaned step removed"
 msgstr ""
 
 #: app/forms/admin.py:8
@@ -145,15 +232,16 @@ msgid ""
 msgstr ""
 
 #: app/forms/admin.py:25 app/forms/admin.py:37
-#: app/templates/admin/user_details_modal.html:57 app/templates/login.html:23
+#: app/templates/admin/user_details_modal.html:57
+#: app/templates/hybrid-password-form.html:92 app/templates/login.html:46
 #: app/templates/modals/create-admin.html:17
 #: app/templates/modals/edit-admin.html:17
 msgid "Username"
 msgstr ""
 
 #: app/forms/admin.py:26 app/templates/choose-password.html:23
-#: app/templates/login.html:29 app/templates/modals/create-admin.html:22
-#: app/templates/profile.html:25
+#: app/templates/hybrid-password-form.html:124 app/templates/login.html:52
+#: app/templates/modals/create-admin.html:22 app/templates/profile.html:25
 msgid "Password"
 msgstr ""
 
@@ -179,47 +267,47 @@ msgstr ""
 msgid "Server Type"
 msgstr ""
 
-#: app/forms/settings.py:22
+#: app/forms/settings.py:23
 msgid "Server Name"
 msgstr ""
 
-#: app/forms/settings.py:25
+#: app/forms/settings.py:26
 msgid "RomM Username"
 msgstr ""
 
-#: app/forms/settings.py:26
+#: app/forms/settings.py:27
 msgid "RomM Password"
 msgstr ""
 
-#: app/forms/settings.py:27 app/templates/admin/user_details_modal.html:60
-#: app/templates/tables/invite_card.html:196
-#: app/templates/tables/invite_card.html:200
+#: app/forms/settings.py:28 app/templates/admin/user_details_modal.html:60
+#: app/templates/tables/invite_card.html:238
+#: app/templates/tables/invite_card.html:247
 msgid "Libraries"
 msgstr ""
 
-#: app/forms/settings.py:29 app/forms/settings.py:45
-#: app/templates/modals/invite.html:190 app/templates/modals/invite.html:201
-#: app/templates/modals/invite.html:212 app/templates/tables/user_card.html:92
+#: app/forms/settings.py:30 app/forms/settings.py:46
+#: app/templates/modals/invite.html:195 app/templates/modals/invite.html:211
+#: app/templates/modals/invite.html:222 app/templates/modals/invite.html:238
 msgid "Allow Downloads"
 msgstr ""
 
-#: app/forms/settings.py:32
+#: app/forms/settings.py:33
 msgid "Allow Live TV"
 msgstr ""
 
-#: app/forms/settings.py:35
+#: app/forms/settings.py:36
 msgid "Overseerr/Ombi URL"
 msgstr ""
 
-#: app/forms/settings.py:37
+#: app/forms/settings.py:38
 msgid "Ombi API Key"
 msgstr ""
 
-#: app/forms/settings.py:38
+#: app/forms/settings.py:39
 msgid "Discord ID"
 msgstr ""
 
-#: app/forms/settings.py:39
+#: app/forms/settings.py:40
 msgid "External URL"
 msgstr ""
 
@@ -289,6 +377,10 @@ msgstr ""
 msgid "Kavita"
 msgstr ""
 
+#: app/services/servers.py:277
+msgid "Navidrome"
+msgstr ""
+
 #: app/templates/admin.html:5
 msgid "Admin"
 msgstr ""
@@ -310,6 +402,7 @@ msgid "Choose a password for the remaining servers"
 msgstr ""
 
 #: app/templates/choose-password.html:27
+#: app/templates/hybrid-password-form.html:139
 msgid "Confirm Password"
 msgstr ""
 
@@ -321,40 +414,160 @@ msgstr ""
 msgid "Continue"
 msgstr ""
 
+#: app/templates/hybrid-password-form.html:7
+msgid "Complete your account setup for local servers"
+msgstr ""
+
+#: app/templates/hybrid-password-form.html:13
+msgid "Complete Your Account Setup"
+msgstr ""
+
+#: app/templates/hybrid-password-form.html:24
+msgid "Plex Authentication Complete!"
+msgstr ""
+
+#: app/templates/hybrid-password-form.html:25
+msgid "Now please set a password for your local server accounts."
+msgstr ""
+
+#: app/templates/hybrid-password-form.html:33
+msgid "Local Servers"
+msgstr ""
+
+#: app/templates/hybrid-password-form.html:66
+msgid "Set Password for Local Servers"
+msgstr ""
+
+#: app/templates/hybrid-password-form.html:76
+msgid "Error!"
+msgstr ""
+
+#: app/templates/hybrid-password-form.html:96
+msgid "Your username"
+msgstr ""
+
+#: app/templates/hybrid-password-form.html:108
+msgid "Email Address"
+msgstr ""
+
+#: app/templates/hybrid-password-form.html:112
+msgid "your.email@example.com"
+msgstr ""
+
+#: app/templates/hybrid-password-form.html:128
+msgid "Your password"
+msgstr ""
+
+#: app/templates/hybrid-password-form.html:143
+msgid "Confirm your password"
+msgstr ""
+
+#: app/templates/hybrid-password-form.html:160
+msgid "I agree to the"
+msgstr ""
+
+#: app/templates/hybrid-password-form.html:162
+msgid "Terms and Conditions"
+msgstr ""
+
+#: app/templates/hybrid-password-form.html:170
+msgid "Complete Setup"
+msgstr ""
+
+#: app/templates/hybrid-password-form.html:177
+msgid "What happens next?"
+msgstr ""
+
+#: app/templates/hybrid-password-form.html:180
+msgid "Your Plex account is already set up and ready to use"
+msgstr ""
+
+#: app/templates/hybrid-password-form.html:181
+msgid "This password will be used to create accounts on your local servers"
+msgstr ""
+
+#: app/templates/hybrid-password-form.html:182
+msgid "You'll be redirected to the setup wizard to complete configuration"
+msgstr ""
+
+#: app/templates/hybrid-password-form.html:189
+msgid "Only want to use Plex?"
+msgstr ""
+
+#: app/templates/hybrid-password-form.html:192
+msgid "Skip local servers"
+msgstr ""
+
+#: app/templates/hybrid-password-form.html:208
+msgid "Password too short"
+msgstr ""
+
+#: app/templates/hybrid-password-form.html:211
+msgid "Password strength: Medium"
+msgstr ""
+
+#: app/templates/hybrid-password-form.html:214
+msgid "Password strength: Strong"
+msgstr ""
+
+#: app/templates/hybrid-password-form.html:226
+msgid "Passwords do not match"
+msgstr ""
+
 #: app/templates/invalid-invite.html:16
 msgid "Invalid Invitation"
 msgstr ""
 
-#: app/templates/login.html:18
+#: app/templates/login.html:19
+msgid "Two-Factor Authentication"
+msgstr ""
+
+#: app/templates/login.html:21
 msgid "Login"
 msgstr ""
 
-#: app/templates/login.html:41
+#: app/templates/login.html:34
+#, python-brace-format
+msgid "Welcome back, {}!"
+msgstr ""
+
+#: app/templates/login.html:37
+msgid "Please authenticate with your passkey to complete login."
+msgstr ""
+
+#: app/templates/login.html:64
 msgid "Remember me"
 msgstr ""
 
-#: app/templates/login.html:46
+#: app/templates/login.html:69
 msgid "Sign in"
 msgstr ""
 
-#: app/templates/login.html:55
+#: app/templates/login.html:83
+msgid "Authenticate with Passkey"
+msgstr ""
+
+#: app/templates/login.html:92
+msgid "Back to Login"
+msgstr ""
+
+#: app/templates/login.html:101
 msgid "Or"
 msgstr ""
 
-#: app/templates/login.html:64 app/templates/login.html:152
+#: app/templates/login.html:110 app/templates/login.html:226
 msgid "Sign in with Passkey"
 msgstr ""
 
-#: app/templates/login.html:82
+#: app/templates/login.html:138
 msgid "Authenticating..."
 msgstr ""
 
-#: app/templates/login.html:94 app/templates/login.html:135
-#: app/templates/login.html:139
-msgid "Authentication failed"
+#: app/templates/login.html:203
+msgid "Failed to complete 2FA login"
 msgstr ""
 
-#: app/templates/login.html:144
+#: app/templates/login.html:218
 msgid "Passkey authentication failed. Please try again or use your password."
 msgstr ""
 
@@ -378,40 +591,10 @@ msgstr ""
 msgid "Change Password"
 msgstr ""
 
-#: app/templates/settings.html:13
-msgid "Server settings"
-msgstr ""
-
-#: app/templates/settings.html:22
-msgid "Notification agents"
-msgstr ""
-
-#: app/templates/user-plex-login.html:7 app/templates/user-plex-login.html:14
-#: app/templates/welcome-jellyfin.html:7 app/templates/welcome-jellyfin.html:14
+#: app/templates/user-plex-login.html:7 app/templates/welcome-jellyfin.html:7
+#: app/templates/welcome-jellyfin.html:14
 #, python-format
 msgid "You've been invited to join the %(name)s server!"
-msgstr ""
-
-#: app/templates/user-plex-login.html:23
-msgid "Join the Plex Server"
-msgstr ""
-
-#: app/templates/tables/user_card.html:82 app/templates/user-plex-login.html:29
-#: app/templates/user-plex-login.html:40
-msgid "Invite Code"
-msgstr ""
-
-#: app/templates/modals/invite.html:39 app/templates/user-plex-login.html:32
-#: app/templates/user-plex-login.html:44
-msgid "E.g. XMFGEJIKNQ"
-msgstr ""
-
-#: app/templates/user-plex-login.html:45
-msgid "Oops!"
-msgstr ""
-
-#: app/templates/user-plex-login.html:52
-msgid "Join"
 msgstr ""
 
 #: app/templates/users.html:5
@@ -431,11 +614,11 @@ msgstr ""
 msgid "Latest Accepted Invites"
 msgstr ""
 
-#: app/templates/admin/accepted_invites_card.html:28
-msgid "Deleted user"
+#: app/templates/admin/accepted_invites_card.html:31
+msgid "Recently joined"
 msgstr ""
 
-#: app/templates/admin/accepted_invites_card.html:52
+#: app/templates/admin/accepted_invites_card.html:84
 msgid "No recent invitations have been accepted."
 msgstr ""
 
@@ -478,7 +661,7 @@ msgstr ""
 
 #: app/templates/admin/library_breakdown_card.html:129
 #: app/templates/admin/recent_content_card.html:126
-#: app/templates/admin/server_health_card.html:175
+#: app/templates/admin/server_health_card.html:172
 #: app/templates/admin/server_stats_card.html:81
 msgid "Unknown error occurred"
 msgstr ""
@@ -523,60 +706,60 @@ msgstr ""
 msgid "Server Health"
 msgstr ""
 
-#: app/templates/admin/server_health_card.html:48
+#: app/templates/admin/server_health_card.html:45
 #: app/templates/admin/server_stats_card.html:35
 msgid "Online"
 msgstr ""
 
-#: app/templates/admin/server_health_card.html:52
+#: app/templates/admin/server_health_card.html:49
 msgid "Offline"
 msgstr ""
 
-#: app/templates/admin/server_health_card.html:68
+#: app/templates/admin/server_health_card.html:65
 #: app/templates/admin/server_stats_card.html:29
 #: app/templates/settings/notifications.html:68
 msgid "Active"
 msgstr ""
 
-#: app/templates/admin/server_health_card.html:79
-#: app/templates/admin/server_health_card.html:108
+#: app/templates/admin/server_health_card.html:76
+#: app/templates/admin/server_health_card.html:105
 msgid "Transcoding"
 msgstr ""
 
-#: app/templates/admin/server_health_card.html:89
+#: app/templates/admin/server_health_card.html:86
 #: app/templates/admin/server_stats_card.html:23
 msgid "Users"
 msgstr ""
 
-#: app/templates/admin/server_health_card.html:101
+#: app/templates/admin/server_health_card.html:98
 msgid "Active Sessions"
 msgstr ""
 
-#: app/templates/admin/server_health_card.html:126
+#: app/templates/admin/server_health_card.html:123
 msgid "Server is currently unreachable"
 msgstr ""
 
-#: app/templates/admin/server_health_card.html:142
+#: app/templates/admin/server_health_card.html:139
 msgid "of"
 msgstr ""
 
-#: app/templates/admin/server_health_card.html:144
+#: app/templates/admin/server_health_card.html:141
 msgid "servers online"
 msgstr ""
 
-#: app/templates/admin/server_health_card.html:149
+#: app/templates/admin/server_health_card.html:146
 msgid "server(s) need attention"
 msgstr ""
 
-#: app/templates/admin/server_health_card.html:161
+#: app/templates/admin/server_health_card.html:158
 msgid "No servers configured"
 msgstr ""
 
-#: app/templates/admin/server_health_card.html:162
+#: app/templates/admin/server_health_card.html:159
 msgid "Add media servers to monitor their health"
 msgstr ""
 
-#: app/templates/admin/server_health_card.html:174
+#: app/templates/admin/server_health_card.html:171
 msgid "Failed to load server health"
 msgstr ""
 
@@ -608,6 +791,10 @@ msgstr ""
 msgid "Joined"
 msgstr ""
 
+#: app/templates/admin/user_details_modal.html:54
+msgid "Account Details"
+msgstr ""
+
 #: app/templates/admin/user_details_modal.html:68
 msgid "All libraries"
 msgstr ""
@@ -617,8 +804,10 @@ msgid "Policies"
 msgstr ""
 
 #: app/templates/admin/user_details_modal.html:89
+#: app/templates/components/admin_passkeys.html:58
+#: app/templates/components/admin_passkeys.html:72
 #: app/templates/components/passkey_error.html:17
-#: app/templates/modals/invite.html:307
+#: app/templates/modals/invite.html:332
 msgid "Close"
 msgstr ""
 
@@ -626,54 +815,164 @@ msgstr ""
 msgid "Edit expiry"
 msgstr ""
 
-#: app/templates/admin/user_modal.html:31
+#: app/templates/admin/user_modal.html:26
+msgid "Server-specific Expiry Management"
+msgstr ""
+
+#: app/templates/admin/user_modal.html:29
+msgid ""
+"This user exists on multiple servers. You can set different expiry dates "
+"for each server."
+msgstr ""
+
+#: app/templates/admin/user_modal.html:53
+msgid "Expiry date"
+msgstr ""
+
+#: app/templates/admin/user_modal.html:63
+msgid "Update"
+msgstr ""
+
+#: app/templates/admin/user_modal.html:69
+msgid "Current expiry"
+msgstr ""
+
+#: app/templates/admin/user_modal.html:71
+msgid "No expiry set"
+msgstr ""
+
+#: app/templates/admin/user_modal.html:86
 msgid "Expiry date (leave blank for never)"
 msgstr ""
 
-#: app/templates/admin/user_modal.html:42
+#: app/templates/admin/user_modal.html:96
 #: app/templates/modals/edit-admin.html:33
 #: app/templates/modals/edit-identity.html:26
-#: app/templates/modals/edit-server.html:89
+#: app/templates/modals/edit-server.html:104
 #: app/templates/modals/wizard-bundle-form.html:30
 #: app/templates/modals/wizard-simple-step-form.html:29
-#: app/templates/modals/wizard-step-form.html:42
-#: app/templates/settings/partials/server_form.html:217
-#: app/templates/settings/wizard/bundle_form.html:21
-#: app/templates/settings/wizard/form.html:32
-#: app/templates/settings/wizard/simple_form.html:21
+#: app/templates/modals/wizard-step-form.html:37
+#: app/templates/settings/wizard/bundle_form.html:20
+#: app/templates/settings/wizard/form.html:26
+#: app/templates/settings/wizard/simple_form.html:20
 msgid "Save"
 msgstr ""
 
-#: app/templates/admin/user_modal.html:47
+#: app/templates/admin/user_modal.html:101
 #: app/templates/components/passkey_add_form.html:26
 #: app/templates/components/passkey_register.html:16
 #: app/templates/modals/bundle-add-steps.html:32
+#: app/templates/modals/connection-form.html:186
 #: app/templates/modals/create-admin.html:34
+#: app/templates/modals/create-api-key.html:66
 #: app/templates/modals/create-notification-agent.html:91
-#: app/templates/modals/create-server.html:87
+#: app/templates/modals/create-server.html:103
 #: app/templates/modals/edit-admin.html:34
 #: app/templates/modals/edit-identity.html:27
-#: app/templates/modals/edit-server.html:90
-#: app/templates/modals/invite.html:244
+#: app/templates/modals/edit-server.html:105
+#: app/templates/modals/invite.html:269
 #: app/templates/modals/wizard-bundle-form.html:29
+#: app/templates/modals/wizard-preset-form.html:52
 #: app/templates/modals/wizard-simple-step-form.html:28
-#: app/templates/modals/wizard-step-form.html:41
-#: app/templates/settings/wizard/bundle_form.html:22
-#: app/templates/settings/wizard/form.html:39
-#: app/templates/settings/wizard/simple_form.html:22
+#: app/templates/modals/wizard-step-form.html:36
+#: app/templates/settings/connections/form.html:192
+#: app/templates/settings/wizard/bundle_form.html:21
+#: app/templates/settings/wizard/form.html:33
+#: app/templates/settings/wizard/preset_form.html:43
+#: app/templates/settings/wizard/simple_form.html:21
 msgid "Cancel"
 msgstr ""
 
-#: app/templates/admin/users.html:21
+#: app/templates/admin/user_modal.html:111
+msgid "Invitation Details"
+msgstr ""
+
+#: app/templates/admin/user_modal.html:114
+msgid "Code"
+msgstr ""
+
+#: app/templates/admin/user_modal.html:116 app/templates/modals/invite.html:116
+#: app/templates/modals/invite.html:149
+#: app/templates/tables/invite_card.html:193
+msgid "Duration"
+msgstr ""
+
+#: app/templates/admin/user_modal.html:116
+#: app/templates/tables/invite_card.html:195
+msgid "days"
+msgstr ""
+
+#: app/templates/admin/user_modal.html:119
+msgid "Invitation expires"
+msgstr ""
+
+#: app/templates/admin/users.html:176
 msgid "Link"
 msgstr ""
 
-#: app/templates/admin/users.html:22
+#: app/templates/admin/users.html:177
 msgid "Unlink"
 msgstr ""
 
-#: app/templates/admin/users.html:23 app/templates/servers/index.html:27
+#: app/templates/admin/users.html:178 app/templates/servers/index.html:27
+#: app/templates/settings/connections.html:120
 msgid "Delete"
+msgstr ""
+
+#: app/templates/components/admin_passkeys.html:5
+#, python-brace-format
+msgid "Passkeys for {}"
+msgstr ""
+
+#: app/templates/components/admin_passkeys.html:29
+#: app/templates/tables/invite_card.html:183
+msgid "Created"
+msgstr ""
+
+#: app/templates/components/admin_passkeys.html:33
+#: app/templates/components/passkey_list.html:17
+msgid "Last used"
+msgstr ""
+
+#: app/templates/components/admin_passkeys.html:54
+msgid "Reset All Passkeys"
+msgstr ""
+
+#: app/templates/components/admin_passkeys.html:68
+msgid "No passkeys registered for this user."
+msgstr ""
+
+#: app/templates/components/admin_passkeys.html:80
+msgid "Are you sure you want to delete this passkey?"
+msgstr ""
+
+#: app/templates/components/admin_passkeys.html:92
+msgid "Failed to delete passkey"
+msgstr ""
+
+#: app/templates/components/admin_passkeys.html:97
+msgid "An error occurred while deleting the passkey"
+msgstr ""
+
+#: app/templates/components/admin_passkeys.html:103
+#, python-brace-format
+msgid "Are you sure you want to reset ALL passkeys for {}?"
+msgstr ""
+
+#: app/templates/components/admin_passkeys.html:103
+msgid "This action cannot be undone."
+msgstr ""
+
+#: app/templates/components/admin_passkeys.html:112
+msgid "All passkeys have been reset"
+msgstr ""
+
+#: app/templates/components/admin_passkeys.html:115
+msgid "Failed to reset passkeys"
+msgstr ""
+
+#: app/templates/components/admin_passkeys.html:120
+msgid "An error occurred while resetting passkeys"
 msgstr ""
 
 #: app/templates/components/passkey_add_form.html:3
@@ -697,10 +996,6 @@ msgstr ""
 msgid "Added"
 msgstr ""
 
-#: app/templates/components/passkey_list.html:17
-msgid "Last used"
-msgstr ""
-
 #: app/templates/components/passkey_list.html:40
 msgid "No passkeys registered"
 msgstr ""
@@ -713,15 +1008,24 @@ msgstr ""
 msgid "Passkeys"
 msgstr ""
 
-#: app/templates/components/passkey_management.html:15
+#: app/templates/components/passkey_management.html:16
+#: app/templates/components/passkey_management.html:25
+msgid "Passkeys require HTTPS connection"
+msgstr ""
+
+#: app/templates/components/passkey_management.html:17
 msgid "Add Passkey"
 msgstr ""
 
-#: app/templates/components/passkey_management.html:18
+#: app/templates/components/passkey_management.html:27
+msgid "To use passkeys, please access this page over HTTPS."
+msgstr ""
+
+#: app/templates/components/passkey_management.html:29
 msgid "Manage your passkeys for passwordless authentication."
 msgstr ""
 
-#: app/templates/components/passkey_management.html:27
+#: app/templates/components/passkey_management.html:39
 msgid "Loading passkeys..."
 msgstr ""
 
@@ -733,11 +1037,11 @@ msgstr ""
 msgid "Please follow your device's prompts to complete setup"
 msgstr ""
 
-#: app/templates/components/passkey_register.html:95
+#: app/templates/components/passkey_register.html:101
 msgid "Failed to register passkey"
 msgstr ""
 
-#: app/templates/components/passkey_register.html:100
+#: app/templates/components/passkey_register.html:106
 msgid "Failed to complete passkey registration"
 msgstr ""
 
@@ -770,8 +1074,8 @@ msgid "Add steps to bundle"
 msgstr ""
 
 #: app/templates/modals/bundle-add-steps.html:23
-#: app/templates/settings/wizard/bundles.html:47
-#: app/templates/settings/wizard/steps.html:27
+#: app/templates/settings/wizard/bundles.html:52
+#: app/templates/settings/wizard/steps.html:31
 msgid "Untitled"
 msgstr ""
 
@@ -784,8 +1088,106 @@ msgstr ""
 msgid "Add"
 msgstr ""
 
+#: app/templates/modals/connection-form.html:9
+#: app/templates/settings/connections/form.html:5
+#: app/templates/settings/connections/form.html:58
+msgid "Add New Connection"
+msgstr ""
+
+#: app/templates/modals/connection-form.html:11
+#: app/templates/settings/connections/form.html:7
+#: app/templates/settings/connections/form.html:47
+#: app/templates/settings/connections/form.html:60
+msgid "Edit Connection"
+msgstr ""
+
+#: app/templates/modals/connection-form.html:22
+msgid "Close modal"
+msgstr ""
+
+#: app/templates/modals/connection-form.html:88
+#: app/templates/settings/connections/form.html:128
+msgid "Overseerr/Jellyseerr Information"
+msgstr ""
+
+#: app/templates/modals/connection-form.html:90
+#: app/templates/settings/connections/form.html:130
+msgid ""
+"Overseerr and Jellyseerr automatically import new users by default. No "
+"API connection is required for Wizarr integration."
+msgstr ""
+
+#: app/templates/modals/connection-form.html:94
+#: app/templates/settings/connections/form.html:133
+msgid "To enable auto-import:"
+msgstr ""
+
+#: app/templates/modals/connection-form.html:95
+msgid ""
+"Go to your Overseerr/Jellyseerr Settings → Users → Enable 'Auto-approve "
+"new users' and 'Import Jellyfin/Plex users'"
+msgstr ""
+
+#: app/templates/modals/connection-form.html:151
+msgid "Testing connection..."
+msgstr ""
+
+#: app/templates/modals/connection-form.html:162
+#: app/templates/settings/connections/form.html:199
+msgid "Create Connection"
+msgstr ""
+
+#: app/templates/modals/connection-form.html:164
+#: app/templates/settings/connections/form.html:201
+msgid "Update Connection"
+msgstr ""
+
+#: app/templates/modals/connection-form.html:177
+msgid "Test Connection"
+msgstr ""
+
 #: app/templates/modals/create-admin.html:10
 msgid "Add Administrator"
+msgstr ""
+
+#: app/templates/modals/create-api-key.html:11
+msgid "API Key Created"
+msgstr ""
+
+#: app/templates/modals/create-api-key.html:13
+#: app/templates/settings/api_keys.html:17
+#: app/templates/settings/general.html:113
+msgid "Create API Key"
+msgstr ""
+
+#: app/templates/modals/create-api-key.html:26
+msgid "API Key Created Successfully"
+msgstr ""
+
+#: app/templates/modals/create-api-key.html:29
+msgid ""
+"Your API key has been created. Please copy it now as it will not be shown"
+" again."
+msgstr ""
+
+#: app/templates/modals/create-api-key.html:35
+msgid "Copy to clipboard"
+msgstr ""
+
+#: app/templates/modals/create-api-key.html:42
+msgid "Name:"
+msgstr ""
+
+#: app/templates/modals/create-api-key.html:48
+msgid "Done"
+msgstr ""
+
+#: app/templates/modals/create-api-key.html:57
+msgid "API Key Name"
+msgstr ""
+
+#: app/templates/modals/create-api-key.html:60
+msgid "Enter a descriptive name to help you identify this API key later."
 msgstr ""
 
 #: app/templates/modals/create-notification-agent.html:31
@@ -817,7 +1219,7 @@ msgstr ""
 msgid "Add Server"
 msgstr ""
 
-#: app/templates/modals/create-server.html:86
+#: app/templates/modals/create-server.html:102
 msgid "Test & Add"
 msgstr ""
 
@@ -841,7 +1243,7 @@ msgstr ""
 msgid "Edit Server"
 msgstr ""
 
-#: app/templates/modals/invite.html:10 app/templates/modals/invite.html:243
+#: app/templates/modals/invite.html:10 app/templates/modals/invite.html:268
 msgid "Create Invitation"
 msgstr ""
 
@@ -849,112 +1251,148 @@ msgstr ""
 msgid "Invitation Created"
 msgstr ""
 
-#: app/templates/modals/invite.html:28
+#: app/templates/modals/invite.html:33
 msgid "Invite Code String"
 msgstr ""
 
-#: app/templates/modals/invite.html:29
+#: app/templates/modals/invite.html:34
 msgid "optional"
 msgstr ""
 
-#: app/templates/modals/invite.html:49
+#: app/templates/modals/invite.html:44
+msgid "E.g. XMFGEJIKNQ"
+msgstr ""
+
+#: app/templates/modals/invite.html:54
 msgid "Expiration"
 msgstr ""
 
-#: app/templates/modals/invite.html:58
+#: app/templates/modals/invite.html:63
 msgid "1 day"
 msgstr ""
 
-#: app/templates/modals/invite.html:59
+#: app/templates/modals/invite.html:64
 msgid "1 week"
 msgstr ""
 
-#: app/templates/modals/invite.html:60
+#: app/templates/modals/invite.html:65
 msgid "1 month"
 msgstr ""
 
-#: app/templates/modals/invite.html:69
+#: app/templates/modals/invite.html:74
 msgid "Wizard bundle"
 msgstr ""
 
-#: app/templates/modals/invite.html:72
+#: app/templates/modals/invite.html:77
 msgid "Automatic"
 msgstr ""
 
-#: app/templates/modals/invite.html:87
+#: app/templates/modals/invite.html:92
 msgid "Advanced Options"
 msgstr ""
 
-#: app/templates/modals/invite.html:96
+#: app/templates/modals/invite.html:101
 msgid "Invite Settings"
 msgstr ""
 
-#: app/templates/modals/invite.html:102
+#: app/templates/modals/invite.html:107
 msgid "Unlimited Usages"
 msgstr ""
 
-#: app/templates/modals/invite.html:111 app/templates/modals/invite.html:144
-#: app/templates/tables/invite_card.html:164
-msgid "Duration"
-msgstr ""
-
-#: app/templates/modals/invite.html:112
+#: app/templates/modals/invite.html:117
 msgid "in days"
 msgstr ""
 
-#: app/templates/modals/invite.html:132
+#: app/templates/modals/invite.html:137
 msgid "Show Information"
 msgstr ""
 
-#: app/templates/modals/invite.html:146
+#: app/templates/modals/invite.html:151
 msgid ""
 "When set, invited user(s) will be removed from the Plex server after a "
 "number of days. (1-999)"
 msgstr ""
 
-#: app/templates/modals/invite.html:168
+#: app/templates/modals/invite.html:173
 msgid "Target servers"
 msgstr ""
 
-#: app/templates/modals/invite.html:185
+#: app/templates/modals/invite.html:190
 msgid "Invite to Plex Home"
 msgstr ""
 
-#: app/templates/modals/invite.html:195 app/templates/modals/invite.html:206
+#: app/templates/modals/invite.html:200 app/templates/modals/invite.html:216
+#: app/templates/modals/invite.html:227
 msgid "Allow Live TV Access"
 msgstr ""
 
-#: app/templates/modals/invite.html:224
+#: app/templates/modals/invite.html:205 app/templates/modals/invite.html:232
+msgid "Allow Mobile Uploads"
+msgstr ""
+
+#: app/templates/modals/invite.html:250
 msgid "Select Libraries"
 msgstr ""
 
-#: app/templates/modals/invite.html:231
+#: app/templates/modals/invite.html:257 app/templates/modals/invite.html:372
 msgid "Loading…"
 msgstr ""
 
-#: app/templates/modals/invite.html:255
+#: app/templates/modals/invite.html:280
 msgid "Successfully generated an Invitation!"
 msgstr ""
 
-#: app/templates/modals/invite.html:263
+#: app/templates/modals/invite.html:288
 msgid "Invitation Link"
 msgstr ""
 
-#: app/templates/modals/invite.html:282
+#: app/templates/modals/invite.html:307
 msgid "Copy"
 msgstr ""
 
-#: app/templates/modals/invite.html:290
+#: app/templates/modals/invite.html:315
 msgid "Link has been copied to clipboard!"
 msgstr ""
 
-#: app/templates/modals/invite.html:300
+#: app/templates/modals/invite.html:325
 msgid "Create Another"
 msgstr ""
 
-#: app/templates/modals/wizard-step-form.html:37
-#: app/templates/settings/wizard/form.html:28
-msgid "Comma-separated setting keys (leave empty for always visible)"
+#: app/templates/modals/invite.html:382
+msgid "Please select at least one server for the invitation."
+msgstr ""
+
+#: app/templates/modals/wizard-preset-form.html:11
+#: app/templates/settings/wizard/preset_form.html:4
+msgid "Add Preset Wizard Step"
+msgstr ""
+
+#: app/templates/modals/wizard-preset-form.html:33
+#: app/templates/settings/wizard/preset_form.html:23
+msgid "Your Discord server ID"
+msgstr ""
+
+#: app/templates/modals/wizard-preset-form.html:39
+#: app/templates/settings/wizard/preset_form.html:29
+msgid "URL to your Overseerr/Ombi instance"
+msgstr ""
+
+#: app/templates/modals/wizard-preset-form.html:53
+#: app/templates/settings/wizard/_sub_nav.html:78
+#: app/templates/settings/wizard/preset_form.html:42
+msgid "Create Step"
+msgstr ""
+
+#: app/templates/partials/api_keys_grid.html:29
+msgid "Delete API Key"
+msgstr ""
+
+#: app/templates/partials/api_keys_grid.html:45
+msgid "No API keys"
+msgstr ""
+
+#: app/templates/partials/api_keys_grid.html:46
+msgid "Get started by creating a new API key."
 msgstr ""
 
 #: app/templates/servers/index.html:5 app/templates/settings/servers.html:6
@@ -966,10 +1404,12 @@ msgid "Name"
 msgstr ""
 
 #: app/templates/servers/index.html:11
+#: app/templates/settings/connections.html:34
 msgid "Type"
 msgstr ""
 
 #: app/templates/servers/index.html:12
+#: app/templates/settings/connections.html:36
 msgid "URL"
 msgstr ""
 
@@ -978,10 +1418,12 @@ msgid "Verified"
 msgstr ""
 
 #: app/templates/servers/index.html:14
+#: app/templates/settings/connections.html:37
 msgid "Actions"
 msgstr ""
 
 #: app/templates/servers/index.html:25
+#: app/templates/settings/connections.html:107
 msgid "Edit"
 msgstr ""
 
@@ -997,71 +1439,132 @@ msgstr ""
 msgid "Administrators"
 msgstr ""
 
-#: app/templates/settings/admins.html:39
+#: app/templates/settings/admins.html:24
+msgid "Manage Passkeys"
+msgstr ""
+
+#: app/templates/settings/admins.html:50
 msgid "No administrators yet."
 msgstr ""
 
-#: app/templates/settings/admins.html:49
+#: app/templates/settings/admins.html:60
 msgid "Add Admin"
 msgstr ""
 
-#: app/templates/settings/general.html:7
+#: app/templates/settings/api_keys.html:7
+msgid "API Keys"
+msgstr ""
+
+#: app/templates/settings/connections.html:7
+#: app/templates/settings/connections/form.html:35
+#: app/templates/settings/index.html:67
+msgid "Connections"
+msgstr ""
+
+#: app/templates/settings/connections.html:8
+msgid "Manage external service connections for automated user invitations"
+msgstr ""
+
+#: app/templates/settings/connections.html:20
+#: app/templates/settings/connections/form.html:45
+msgid "Add Connection"
+msgstr ""
+
+#: app/templates/settings/connections.html:33
+msgid "Connection Name"
+msgstr ""
+
+#: app/templates/settings/connections.html:35
+msgid "Media Server"
+msgstr ""
+
+#: app/templates/settings/connections.html:52
+msgid "Overseerr (Info)"
+msgstr ""
+
+#: app/templates/settings/connections.html:59
+msgid "Ombi"
+msgstr ""
+
+#: app/templates/settings/connections.html:66
+msgid "Audiobookrequest"
+msgstr ""
+
+#: app/templates/settings/connections.html:93
+msgid "Auto-import enabled"
+msgstr ""
+
+#: app/templates/settings/connections.html:113
+msgid "Are you sure you want to delete this connection?"
+msgstr ""
+
+#: app/templates/settings/connections.html:135
+msgid "No connections configured"
+msgstr ""
+
+#: app/templates/settings/connections.html:136
+msgid ""
+"Connect your external services to automate user invitations when invites "
+"are created for specific media servers."
+msgstr ""
+
+#: app/templates/settings/connections.html:146
+msgid "Add Your First Connection"
+msgstr ""
+
+#: app/templates/settings/general.html:9
 msgid "General Settings"
 msgstr ""
 
-#: app/templates/settings/general.html:8
+#: app/templates/settings/general.html:10
 msgid "Configure your application's basic settings and preferences"
 msgstr ""
 
-#: app/templates/settings/general.html:33
+#: app/templates/settings/general.html:34
 msgid "Display"
 msgstr ""
 
-#: app/templates/settings/general.html:34
+#: app/templates/settings/general.html:35
 msgid "Configure how your application appears to users"
 msgstr ""
 
-#: app/templates/settings/general.html:59
-msgid "Integrations"
-msgstr ""
-
-#: app/templates/settings/general.html:60
-msgid "Connect with external services and applications"
-msgstr ""
-
-#: app/templates/settings/general.html:70
-#: app/templates/settings/general.html:80
-#: app/templates/settings/general.html:108
-#: app/templates/settings/partials/server_form.html:179
-#: app/templates/settings/partials/server_form.html:192
-#: app/templates/settings/partials/server_form.html:204
-msgid "Optional, leave empty to disable"
-msgstr ""
-
-#: app/templates/settings/general.html:97
-msgid "Community"
-msgstr ""
-
-#: app/templates/settings/general.html:98
-msgid "Connect with your community and social platforms"
-msgstr ""
-
-#: app/templates/settings/general.html:126
+#: app/templates/settings/general.html:61
 msgid "Access Control"
 msgstr ""
 
-#: app/templates/settings/general.html:127
+#: app/templates/settings/general.html:62
 msgid "Manage user access and permissions"
 msgstr ""
 
-#: app/templates/settings/general.html:136
+#: app/templates/settings/general.html:71
 msgid "Control access to the wizard setup process"
 msgstr ""
 
-#: app/templates/settings/general.html:153
+#: app/templates/settings/general.html:93
+msgid "API Key Management"
+msgstr ""
+
+#: app/templates/settings/general.html:94
+msgid "Manage API keys for accessing Wizarr programmatically"
+msgstr ""
+
+#: app/templates/settings/general.html:102
+msgid "Your API Keys"
+msgstr ""
+
+#: app/templates/settings/general.html:103
+msgid "Create and manage API keys for external applications"
+msgstr ""
+
+#: app/templates/settings/general.html:124
+msgid "Loading API keys..."
+msgstr ""
+
+#: app/templates/settings/general.html:137
 msgid "Save Settings"
 msgstr ""
 
+#: app/templates/settings/connections/form.html:27
 #: app/templates/settings/index.html:2 app/templates/settings/index.html:7
 msgid "Settings"
 msgstr ""
@@ -1082,11 +1585,11 @@ msgstr ""
 msgid "Servers"
 msgstr ""
 
-#: app/templates/settings/index.html:67
+#: app/templates/settings/index.html:81
 msgid "Admins"
 msgstr ""
 
-#: app/templates/settings/index.html:82
+#: app/templates/settings/index.html:96
 msgid "Wizard"
 msgstr ""
 
@@ -1131,16 +1634,48 @@ msgstr ""
 msgid "Checking..."
 msgstr ""
 
-#: app/templates/settings/partials/server_form.html:13
-msgid "Server Settings"
+#: app/templates/settings/connections/form.html:65
+msgid "Create a new external service connection for automated user invitations"
 msgstr ""
 
-#: app/templates/settings/partials/server_form.html:74
-msgid "Optional public address users should visit"
+#: app/templates/settings/connections/form.html:67
+msgid "Update the connection settings"
 msgstr ""
 
-#: app/templates/settings/partials/server_form.html:130
-msgid "Scan For Libraries"
+#: app/templates/settings/connections/form.html:89
+msgid "Select the type of connection to configure"
+msgstr ""
+
+#: app/templates/settings/connections/form.html:103
+msgid "A friendly name to identify this connection"
+msgstr ""
+
+#: app/templates/settings/connections/form.html:117
+msgid "Which media server should trigger invitations to this external service"
+msgstr ""
+
+#: app/templates/settings/connections/form.html:135
+msgid "Open your Overseerr/Jellyseerr admin panel"
+msgstr ""
+
+#: app/templates/settings/connections/form.html:136
+msgid "Navigate to Settings → Users"
+msgstr ""
+
+#: app/templates/settings/connections/form.html:137
+msgid "Enable 'Auto-approve new users'"
+msgstr ""
+
+#: app/templates/settings/connections/form.html:138
+msgid "Enable 'Import Jellyfin/Plex users'"
+msgstr ""
+
+#: app/templates/settings/connections/form.html:156
+msgid "The full URL to your external service instance"
+msgstr ""
+
+#: app/templates/settings/connections/form.html:182
+msgid "API key from your external service settings"
 msgstr ""
 
 #: app/templates/settings/wizard/_sub_nav.html:16
@@ -1155,91 +1690,107 @@ msgstr ""
 msgid "Create"
 msgstr ""
 
-#: app/templates/settings/wizard/_sub_nav.html:78
-msgid "Create Step"
-msgstr ""
-
 #: app/templates/settings/wizard/_sub_nav.html:79
 msgid "Add a new wizard step"
 msgstr ""
 
 #: app/templates/settings/wizard/_sub_nav.html:95
-msgid "Create Bundle"
+msgid "Add Preset"
 msgstr ""
 
 #: app/templates/settings/wizard/_sub_nav.html:96
+msgid "Create step from template"
+msgstr ""
+
+#: app/templates/settings/wizard/_sub_nav.html:112
+msgid "Create Bundle"
+msgstr ""
+
+#: app/templates/settings/wizard/_sub_nav.html:113
 msgid "Create a collection of steps"
 msgstr ""
 
-#: app/templates/settings/wizard/bundles.html:8
+#: app/templates/settings/wizard/bundles.html:12
 msgid "No bundles found."
 msgstr ""
 
-#: app/templates/settings/wizard/bundles.html:26
+#: app/templates/settings/wizard/bundles.html:30
 msgid "Are you sure you want to delete this bundle?"
 msgstr ""
 
-#: app/templates/settings/wizard/bundles.html:60
-#: app/templates/settings/wizard/index.html:100
-#: app/templates/settings/wizard/steps.html:39
+#: app/templates/settings/wizard/bundles.html:65
+#: app/templates/settings/wizard/index.html:104
+#: app/templates/settings/wizard/steps.html:43
 msgid "Are you sure you want to delete this step?"
 msgstr ""
 
-#: app/templates/settings/wizard/bundles.html:77
+#: app/templates/settings/wizard/bundles.html:80
+msgid "Step deleted (orphaned)"
+msgstr ""
+
+#: app/templates/settings/wizard/bundles.html:85
+msgid "Are you sure you want to remove this orphaned step?"
+msgstr ""
+
+#: app/templates/settings/wizard/bundles.html:86
+msgid "Remove orphaned step"
+msgstr ""
+
+#: app/templates/settings/wizard/bundles.html:100
 msgid "Add step"
 msgstr ""
 
-#: app/templates/settings/wizard/form.html:37
-#: app/templates/settings/wizard/index.html:57
+#: app/templates/settings/wizard/form.html:31
+#: app/templates/settings/wizard/index.html:61
 msgid "Preview"
 msgstr ""
 
-#: app/templates/settings/wizard/index.html:9
+#: app/templates/settings/wizard/index.html:13
 msgid "Wizard Steps"
 msgstr ""
 
-#: app/templates/settings/wizard/index.html:10
+#: app/templates/settings/wizard/index.html:14
 msgid "Manage your wizard steps and bundles for user onboarding"
 msgstr ""
 
-#: app/templates/settings/wizard/index.html:29
+#: app/templates/settings/wizard/index.html:33
 msgid "No wizard steps found"
 msgstr ""
 
-#: app/templates/settings/wizard/index.html:30
+#: app/templates/settings/wizard/index.html:34
 msgid "Get started by creating your first wizard step"
 msgstr ""
 
-#: app/templates/settings/wizard/index.html:47
+#: app/templates/settings/wizard/index.html:51
 msgid "Server"
 msgstr ""
 
-#: app/templates/settings/wizard/index.html:48
+#: app/templates/settings/wizard/index.html:52
 msgid "steps configured"
 msgstr ""
 
-#: app/templates/settings/wizard/index.html:53
-#: app/templates/settings/wizard/steps.html:17
+#: app/templates/settings/wizard/index.html:57
+#: app/templates/settings/wizard/steps.html:21
 msgid "Preview Wizard"
 msgstr ""
 
-#: app/templates/settings/wizard/index.html:76
+#: app/templates/settings/wizard/index.html:80
 msgid "Untitled Step"
 msgstr ""
 
-#: app/templates/settings/wizard/index.html:79
+#: app/templates/settings/wizard/index.html:83
 msgid "Step"
 msgstr ""
 
-#: app/templates/settings/wizard/index.html:90
+#: app/templates/settings/wizard/index.html:94
 msgid "Edit step"
 msgstr ""
 
-#: app/templates/settings/wizard/index.html:102
+#: app/templates/settings/wizard/index.html:106
 msgid "Delete step"
 msgstr ""
 
-#: app/templates/settings/wizard/steps.html:8
+#: app/templates/settings/wizard/steps.html:12
 msgid "No steps found."
 msgstr ""
 
@@ -1247,61 +1798,45 @@ msgstr ""
 msgid "Setup Wizarr"
 msgstr ""
 
-#: app/templates/tables/invite_card.html:43
-#: app/templates/tables/invite_card.html:170
+#: app/templates/tables/invite_card.html:32
+#: app/templates/tables/invite_card.html:199
 msgid "Unlimited"
 msgstr ""
 
-#: app/templates/tables/invite_card.html:76
+#: app/templates/tables/invite_card.html:61
 msgid "There are currently no invitations."
 msgstr ""
 
-#: app/templates/tables/invite_card.html:102
+#: app/templates/tables/invite_card.html:106
 msgid "Copy invite link"
 msgstr ""
 
-#: app/templates/tables/invite_card.html:116
+#: app/templates/tables/invite_card.html:132
 msgid "Delete invite"
 msgstr ""
 
-#: app/templates/tables/invite_card.html:139
+#: app/templates/tables/invite_card.html:164
 msgid "Used by"
 msgstr ""
 
-#: app/templates/tables/invite_card.html:139
-msgid "All servers used"
-msgstr ""
-
-#: app/templates/tables/invite_card.html:141
-msgid "Partially used"
-msgstr ""
-
-#: app/templates/tables/invite_card.html:151
-msgid "Created"
-msgstr ""
-
-#: app/templates/tables/invite_card.html:154
-#: app/templates/tables/user_card.html:64
-msgid "Expires"
-msgstr ""
-
-#: app/templates/tables/invite_card.html:165
-msgid "days"
-msgstr ""
-
-#: app/templates/tables/invite_card.html:169
-msgid "Limit"
-msgstr ""
-
-#: app/templates/tables/invite_card.html:183
+#: app/templates/tables/invite_card.html:168
 msgid "Used"
 msgstr ""
 
-#: app/templates/tables/invite_card.html:187
+#: app/templates/tables/invite_card.html:186
+#: app/templates/tables/user_card.html:67
+msgid "Expires"
+msgstr ""
+
+#: app/templates/tables/invite_card.html:198
+msgid "Limit"
+msgstr ""
+
+#: app/templates/tables/invite_card.html:219
 msgid "libs"
 msgstr ""
 
-#: app/templates/tables/invite_card.html:201
+#: app/templates/tables/invite_card.html:249
 msgid "Default"
 msgstr ""
 
@@ -1311,6 +1846,30 @@ msgstr ""
 
 #: app/templates/tables/user_card.html:34
 msgid "Edit nickname"
+msgstr ""
+
+#: app/templates/tables/user_card.html:85
+msgid "Invited"
+msgstr ""
+
+#: app/templates/tables/user_card.html:95
+msgid "Invite Code"
+msgstr ""
+
+#: app/templates/tables/user_card.html:108
+msgid "Downloads enabled"
+msgstr ""
+
+#: app/templates/tables/user_card.html:114
+msgid "Downloads disabled"
+msgstr ""
+
+#: app/templates/tables/user_card.html:123
+msgid "Live TV enabled"
+msgstr ""
+
+#: app/templates/tables/user_card.html:129
+msgid "Live TV disabled"
 msgstr ""
 
 #: app/templates/wizard/steps.html:28

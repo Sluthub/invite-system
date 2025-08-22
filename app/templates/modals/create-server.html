@@ -14,7 +14,8 @@
                     <form class="space-y-4 md:space-y-6" hx-post="{{ url_for('media_servers.create_server') }}" hx-target="#tab-body" hx-swap="innerHTML">
                         <div>
                             <label for="server_name" class="block mb-2 text-sm font-medium text-gray-900 dark:text-white">Name</label>
-                            <input type="text" name="server_name" id="server_name" placeholder="e.g. My Plex" class="bg-gray-50 border border-gray-300 text-gray-900 sm:text-sm rounded-lg focus:ring-primary focus:border-primary block w-full p-2.5 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white" required>
+                            <input type="text" name="server_name" id="server_name" placeholder="e.g. My Plex" class="bg-gray-50 border border-gray-300 text-gray-900 sm:text-sm rounded-lg focus:ring-primary focus:border-primary block w-full p-2.5 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white"
+                                required>
                         </div>
                         <div>
                             <label for="server_type" class="block mb-2 text-sm font-medium text-gray-900 dark:text-white">Server Type</label>
@@ -26,11 +27,13 @@
                                 <option value="romm">Romm</option>
                                 <option value="komga">Komga</option>
                                 <option value="kavita">Kavita</option>
+                                <option value="navidrome">Navidrome</option>
                             </select>
                         </div>
                         <div>
                             <label for="server_url" class="block mb-2 text-sm font-medium text-gray-900 dark:text-white">URL (Internal)</label>
-                            <input type="text" name="server_url" id="server_url" placeholder="https://plex.local" class="bg-gray-50 border border-gray-300 text-gray-900 sm:text-sm rounded-lg focus:ring-primary focus:border-primary block w-full p-2.5 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white" required>
+                            <input type="text" name="server_url" id="server_url" placeholder="https://plex.local" class="bg-gray-50 border border-gray-300 text-gray-900 sm:text-sm rounded-lg focus:ring-primary focus:border-primary block w-full p-2.5 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white"
+                                required>
                         </div>
                         <div>
                             <label for="external_url" class="block mb-2 text-sm font-medium text-gray-900 dark:text-white">External URL (Optional)</label>
@@ -74,16 +77,13 @@
                             </div>
                         </div>
                         <div class="mt-4">
-                            <a 
-                                hx-post="{{ url_for('settings.scan_libraries') }}" 
-                                hx-include="[name=server_type],[name=server_url],[name=api_key],[name=server_username],[name=server_password]" 
-                                hx-target="#libraries" 
-                                hx-swap="innerHTML"
-                                hx-indicator="#scan-indicator"
-                                class="text-sm text-secondary cursor-pointer hover:text-primary transition-colors"
-                            >
+                            <button type="button" hx-post="{{ url_for('settings.scan_libraries') }}" hx-include="[name=server_type],[name=server_url],[name=api_key],[name=server_username],[name=server_password]" hx-target="#libraries" hx-swap="innerHTML" hx-indicator="#scan-indicator"
+                                class="bg-primary hover:bg-primary_hover text-white font-medium px-5 py-2 rounded-lg shadow-lg transition-all duration-200 flex items-center gap-2">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                                </svg>
                                 Scan Libraries
-                            </a>
+                            </button>
                             <span id="scan-indicator" class="htmx-indicator text-sm text-gray-500 ml-2">
                                 <svg class="animate-spin -ml-1 mr-2 h-4 w-4 text-gray-500 inline" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                                     <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
@@ -104,28 +104,31 @@
     </div>
 </div>
 <script>
-function closeModal(){ document.getElementById('create-server-modal').innerHTML=''; }
-function updateOptions(){
-  const type=document.getElementById('server_type').value;
-  // Show universal media server options for Plex, Jellyfin, Emby, and Audiobookshelf
-  const showMediaOptions = ['plex', 'jellyfin', 'emby', 'audiobookshelf'].includes(type);
-  document.getElementById('media-server-options').style.display = showMediaOptions ? 'block' : 'none';
-  
-  // Hide "Allow Live TV" for Audiobookshelf since it doesn't support Live TV
-  const allowLiveTvOption = document.getElementById('allow-live-tv-option');
-  if (allowLiveTvOption) {
-    allowLiveTvOption.style.display = type === 'audiobookshelf' ? 'none' : 'block';
-  }
-  
-  // Hide "Allow Mobile Uploads" for Audiobookshelf and Jellyfin since they don't support mobile uploads
-  const allowMobileUploadsOption = document.getElementById('allow-mobile-uploads-option');
-  if (allowMobileUploadsOption) {
-    allowMobileUploadsOption.style.display = ['plex', 'emby'].includes(type) ? 'block' : 'none';
-  }
-  
-  document.getElementById('romm-options').style.display = type==='romm' ? 'block' : 'none';
-  document.getElementById('api-key-div').style.display  = type==='romm' ? 'none'  : 'block';
-}
-document.getElementById('server_type').addEventListener('change',updateOptions);
-updateOptions();
-</script> 
+    function closeModal() {
+        document.getElementById('create-server-modal').innerHTML = '';
+    }
+
+    function updateOptions() {
+        const type = document.getElementById('server_type').value;
+        // Show universal media server options for Plex, Jellyfin, Emby, and Audiobookshelf
+        const showMediaOptions = ['plex', 'jellyfin', 'emby', 'audiobookshelf'].includes(type);
+        document.getElementById('media-server-options').style.display = showMediaOptions ? 'block' : 'none';
+
+        // Hide "Allow Live TV" for Audiobookshelf since it doesn't support Live TV
+        const allowLiveTvOption = document.getElementById('allow-live-tv-option');
+        if (allowLiveTvOption) {
+            allowLiveTvOption.style.display = type === 'audiobookshelf' ? 'none' : 'block';
+        }
+
+        // Hide "Allow Mobile Uploads" for Audiobookshelf and Jellyfin since they don't support mobile uploads
+        const allowMobileUploadsOption = document.getElementById('allow-mobile-uploads-option');
+        if (allowMobileUploadsOption) {
+            allowMobileUploadsOption.style.display = ['plex', 'emby'].includes(type) ? 'block' : 'none';
+        }
+
+        document.getElementById('romm-options').style.display = type === 'romm' ? 'block' : 'none';
+        document.getElementById('api-key-div').style.display = type === 'romm' ? 'none' : 'block';
+    }
+    document.getElementById('server_type').addEventListener('change', updateOptions);
+    updateOptions();
+</script>

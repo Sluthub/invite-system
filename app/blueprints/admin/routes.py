@@ -3,11 +3,11 @@ import logging
 import os
 from urllib.parse import urlparse
 
-from flask import Blueprint, redirect, render_template, request, url_for
+from flask import Blueprint, Response, redirect, render_template, request, url_for
 from flask_babel import _
 from flask_login import login_required
 
-from app.extensions import db
+from app.extensions import db, limiter
 from app.models import (
     Identity,
     Invitation,
@@ -17,6 +17,7 @@ from app.models import (
     User,
     invitation_servers,
 )
+from app.services.expiry import get_expired_users, get_expiring_this_week_users
 from app.services.invites import create_invite
 from app.services.media.service import (
     EMAIL_RE,
@@ -74,6 +75,7 @@ def now_playing_cards():
 # Invitations – landing page
 @admin_bp.route("/invite", methods=["GET", "POST"])
 @login_required
+@limiter.limit("30 per minute")
 def invite():
     if not request.headers.get("HX-Request"):
         return redirect(url_for(".dashboard"))
@@ -187,8 +189,12 @@ def invite_table():
     server_filter = request.form.get("server") or request.args.get("server")
 
     if code := request.args.get("delete"):
-        Invitation.query.filter_by(code=code).delete()  # no need to parens
-        db.session.commit()
+        # Find the invitation to delete
+        invitation = Invitation.query.filter_by(code=code).first()
+        if invitation:
+            # Delete the invitation - CASCADE will handle association table cleanup
+            db.session.delete(invitation)
+            db.session.commit()
 
     # ------------------------------------------------------------------
     # 2. Base query (libraries + servers)
@@ -196,6 +202,7 @@ def invite_table():
     query = Invitation.query.options(
         db.joinedload(Invitation.libraries).joinedload(Library.server),
         db.joinedload(Invitation.servers),
+        db.joinedload(Invitation.users),  # NEW: Load all users who used this invitation
     ).order_by(Invitation.created.desc())
 
     # NOTE: If an invitation can point to *multiple* servers,
@@ -211,6 +218,9 @@ def invite_table():
             query = Invitation.query.options(
                 db.joinedload(Invitation.libraries).joinedload(Library.server),
                 db.joinedload(Invitation.servers),
+                db.joinedload(
+                    Invitation.users
+                ),  # NEW: Load all users who used this invitation
             ).order_by(Invitation.created.desc())
 
             srv = MediaServer.query.get(server_id)
@@ -297,7 +307,12 @@ def invite_table():
             # library list for this server (by *server name* key)
             libs = server_libs.get(srv.name, [])
             srv.library_names = libs  # Use a non-conflicting attribute name
-            srv.library_count = len(libs)
+            # If libs is empty (default libraries), count all enabled libraries on this server
+            if libs:
+                srv.library_count = len(libs)
+            else:
+                # Count all enabled libraries on this server for default library invitations
+                srv.library_count = len([lib for lib in srv.libraries if lib.enabled])
 
             # normalise type attr (template looks at srv.type)
             srv.type = srv.server_type
@@ -353,8 +368,19 @@ def _rel_string(target: datetime.datetime, now: datetime.datetime) -> str:
 @admin_bp.route("/users")
 @login_required
 def users():
+    if not request.headers.get("HX-Request"):
+        return redirect(url_for(".dashboard"))
+
     servers = MediaServer.query.order_by(MediaServer.name).all()
-    return render_template("admin/users.html", servers=servers)
+    expiring_users = get_expiring_this_week_users()
+    expired_users = get_expired_users()
+
+    return render_template(
+        "admin/users.html",
+        servers=servers,
+        expiring_users=expiring_users,
+        expired_users=expired_users,
+    )
 
 
 @admin_bp.route("/users/table")
@@ -371,19 +397,11 @@ def users_table():
             if uid.isdigit():
                 delete_user(int(uid))
 
-    # 1) ensure data synced from media servers
-    try:
-        if server_id:
-            srv = MediaServer.query.get(int(server_id))
-            if srv:
-                list_users_for_server(srv)
-        else:
-            list_users_all_servers()
-    except Exception as exc:
-        logging.error("sync users failed: %s", exc)
-
-    # 2) build DB query with eager load to keep session bound
-    q = User.query.options(db.joinedload(User.server))
+    # Build DB query with eager load to keep session bound
+    # Join with Invitation to get invited date for sorting
+    q = User.query.options(db.joinedload(User.server)).outerjoin(
+        Invitation, User.code == Invitation.code
+    )
     if server_id:
         q = q.filter(User.server_id == int(server_id))
     if query_text:
@@ -395,6 +413,10 @@ def users_table():
     # sorting
     if order == "name_desc":
         q = q.order_by(db.func.lower(User.username).desc())
+    elif order == "invited_asc":
+        q = q.order_by(Invitation.created.asc().nullslast())
+    elif order == "invited_desc":
+        q = q.order_by(Invitation.created.desc().nullslast())
     else:
         q = q.order_by(db.func.lower(User.username))
 
@@ -408,37 +430,63 @@ def users_table():
 @login_required
 def user_detail(db_id: int):
     """
-    • GET  → return the small expiry-edit modal
-    • POST → update expiry then return the *entire* card grid
+    • GET  → return the enhanced per-server expiry edit modal
+    • POST → update per-server expiry then return the entire card grid
     """
+    from app.models import Invitation
+    from app.services.expiry import set_server_specific_expiry
+
     user = User.query.get_or_404(db_id)
 
     if request.method == "POST":
-        raw = request.form.get("expires")  # "" or 2025-05-22T14:00
-        user.expires = datetime.datetime.fromisoformat(raw).date() if raw else None
+        # Handle per-server expiry updates
+
+        # Find the invitation this user was created from
+        invitation = None
+        if user.code:
+            invitation = Invitation.query.filter_by(code=user.code).first()
+
+        # Update expiry for the user's specific server
+        raw_expires = request.form.get("expires")
+        user.expires = (
+            datetime.datetime.fromisoformat(raw_expires) if raw_expires else None
+        )
+
+        # If we have an invitation and server, also update the server-specific expiry
+        if invitation and user.server_id:
+            server_expires = (
+                datetime.datetime.fromisoformat(raw_expires) if raw_expires else None
+            )
+            set_server_specific_expiry(invitation.id, user.server_id, server_expires)
+
         db.session.commit()
 
-        # Re-render the grid the same way /users/table does
-        all_dict = list_users_all_servers()
-        users_flat = [u for lst in all_dict.values() for u in lst]
-        response = render_template(
-            "tables/user_card.html", users=_group_users_for_display(users_flat)
-        )
-        # Add a script to close the modal after swap
-        response += """
-<script>
-  setTimeout(function() {
-    var modal = document.getElementById('modal');
-    if (modal) modal.classList.add('hidden');
-    var modalUser = document.getElementById('modal-user');
-    if (modalUser) while (modalUser.firstChild) { modalUser.removeChild(modalUser.firstChild); }
-  }, 50);
-</script>
-"""
+        # Close the modal and refresh the user table to preserve filters/sorting
+        response = Response("")
+        response.headers["HX-Trigger"] = "closeModal, refreshUserTable"
         return response
 
-    # ── GET → serve the compact modal ─────────────────────────────
-    return render_template("admin/user_modal.html", user=user)
+    # ── GET → serve the enhanced modal with server information ────────
+    # Get related accounts if this user is linked via Identity (multi-server setup)
+    related_users = []
+    if user.identity_id:
+        # Get all users that share the same identity (same person across servers)
+        related_users = User.query.filter_by(identity_id=user.identity_id).all()
+    else:
+        # Single user, no identity linking
+        related_users = [user]
+
+    # Get the invitation to show additional context
+    invitation = None
+    if user.code:
+        invitation = Invitation.query.filter_by(code=user.code).first()
+
+    return render_template(
+        "admin/user_modal.html",
+        user=user,
+        related_users=related_users,
+        invitation=invitation,
+    )
 
 
 @admin_bp.post("/invite/scan-libraries")
@@ -510,11 +558,11 @@ def link_accounts():
     for u in users:
         u.identity = identity
     db.session.commit()
-    all_dict = list_users_all_servers()
-    users_flat = [u for lst in all_dict.values() for u in lst]
-    return render_template(
-        "tables/user_card.html", users=_group_users_for_display(users_flat)
-    )
+
+    # Trigger user table refresh to preserve filters/sorting
+    response = Response("")
+    response.headers["HX-Trigger"] = "refreshUserTable"
+    return response
 
 
 @admin_bp.post("/users/unlink")
@@ -558,12 +606,10 @@ def unlink_account():
             db.session.delete(identity)
     db.session.commit()
 
-    # Return refreshed grid
-    all_dict = list_users_all_servers()
-    users_flat = [u for lst in all_dict.values() for u in lst]
-    return render_template(
-        "tables/user_card.html", users=_group_users_for_display(users_flat)
-    )
+    # Trigger user table refresh to preserve filters/sorting
+    response = Response("")
+    response.headers["HX-Trigger"] = "refreshUserTable"
+    return response
 
 
 @admin_bp.post("/users/bulk-delete")
@@ -572,11 +618,11 @@ def bulk_delete_users():
     ids = request.form.getlist("uids")
     for uid in ids:
         delete_user(int(uid))
-    all_dict = list_users_all_servers()
-    users_flat = [u for lst in all_dict.values() for u in lst]
-    return render_template(
-        "tables/user_card.html", users=_group_users_for_display(users_flat)
-    )
+
+    # Trigger user table refresh to preserve filters/sorting
+    response = Response("")
+    response.headers["HX-Trigger"] = "refreshUserTable"
+    return response
 
 
 # Helper: group and enrich users for display
@@ -614,11 +660,21 @@ def _group_users_for_display(user_list):
         )
         allow_sync = any(getattr(a, "allowSync", False) for a in lst)
 
+        # Get the invitation date from the earliest invite code
+        invited_dates = []
+        for a in lst:
+            if hasattr(a, "code") and a.code and a.code not in ("None", "empty"):
+                invitation = Invitation.query.filter_by(code=a.code).first()
+                if invitation and invitation.created:
+                    invited_dates.append(invitation.created)
+        invited_date = min(invited_dates) if invited_dates else None
+
         primary.accounts = lst
         primary.photo = photo or primary.photo
         primary.expires = expires
         primary.code = code
         primary.allowSync = allow_sync
+        primary.invited_date = invited_date
         cards.append(primary)
     return cards
 
@@ -626,120 +682,17 @@ def _group_users_for_display(user_list):
 @admin_bp.route("/user/<int:db_id>/details")
 @login_required
 def user_details_modal(db_id: int):
-    """Return a read-only modal with extended information about a user.
+    """Return a read-only modal with extended information about a user."""
+    from app.services.user_details import UserDetailsService
 
-    The modal shows:
-    • Join date (if available)
-    • List of libraries they can access (server-specific)
-    • Policy / configuration flags returned by the MediaClient
-    """
-    import logging
-
-    from app.services.media.service import get_client_for_media_server
-
-    user = User.query.get_or_404(db_id)
-
-    # ── Join / creation date ─────────────────────────────────────────────
-    join_date = None
-    if user.identity and user.identity.created_at:
-        join_date = user.identity.created_at
-
-    # Determine all linked accounts (same identity) or fallback to current
-    accounts = list(user.identity.accounts) if user.identity_id else [user]
-
-    accounts_info = []
-
-    for acct in accounts:
-        srv = acct.server
-        info: dict = {
-            "server_type": srv.server_type if srv else "local",
-            "server_name": srv.name if srv else "Local",
-            "username": acct.username,
-            "libraries": None,
-            "policies": None,
-        }
-
-        if srv:
-            try:
-                client = get_client_for_media_server(srv)
-                if not hasattr(client, "get_user"):
-                    raise AttributeError("Client lacks get_user()")
-
-                # Plex helper expects DB row id; others typically use upstream id stored in token.
-                user_arg = acct.id if srv.server_type == "plex" else acct.token
-                details = client.get_user(user_arg)
-
-                lib_ids: list[str] | None = None
-
-                if srv.server_type == "plex":
-                    # Custom API wrapper returns Policy.sections
-                    lib_ids = (details.get("Policy", {}) or {}).get("sections") or []
-
-                elif srv.server_type in ("jellyfin", "emby"):
-                    pol = details.get("Policy", {}) or {}
-                    enable_all = pol.get("EnableAllFolders", False)
-                    enabled = pol.get("EnabledFolders", []) or []
-                    # access to all – fallback to None to trigger 'all' UI
-                    lib_ids = enabled if not enable_all and enabled else None
-
-                elif srv.server_type in ("audiobookshelf", "abs"):
-                    all_flag = (details.get("permissions", {}) or {}).get(
-                        "accessAllLibraries", False
-                    )
-                    enabled = details.get("librariesAccessible", []) or []
-                    lib_ids = (
-                        enabled if not all_flag and enabled else None
-                    )  # all libraries
-
-                # Map IDs to names when possible
-                if lib_ids is not None:
-                    libs_q = (
-                        Library.query.filter(
-                            Library.external_id.in_(lib_ids),
-                            Library.server_id == srv.id,
-                        )
-                        .order_by(Library.name)
-                        .all()
-                    )
-                    names = [lib.name for lib in libs_q]
-                    # Preserve IDs with no matching DB row so user sees something
-                    missing = [
-                        lid
-                        for lid in lib_ids
-                        if lid not in {lib.external_id for lib in libs_q}
-                    ]
-                    info["libraries"] = names + missing
-                else:
-                    # lib_ids None means full access – pick all enabled libs for server
-                    libs_q = (
-                        Library.query.filter_by(server_id=srv.id)
-                        .order_by(Library.name)
-                        .all()
-                    )
-                    info["libraries"] = [lib.name for lib in libs_q]
-
-                # Store policies / config for optional display
-                info["policies"] = (
-                    details.get("Configuration")
-                    or details.get("Policy")
-                    or details.get("permissions")
-                )
-
-            except Exception as exc:
-                logging.error(
-                    "Failed to fetch user details for account %s/%s: %s",
-                    acct.id,
-                    acct.username,
-                    exc,
-                )
-
-        accounts_info.append(info)
+    service = UserDetailsService()
+    details = service.get_user_details(db_id)
 
     return render_template(
         "admin/user_details_modal.html",
-        user=user,
-        join_date=join_date,
-        accounts_info=accounts_info,
+        user=details.user,
+        join_date=details.join_date,
+        accounts_info=details.accounts_info,
     )
 
 
@@ -760,23 +713,9 @@ def edit_identity(identity_id):
         identity.nickname = nickname
         db.session.commit()
 
-        # After save, re-render the user cards grid (same as other actions)
-        all_dict = list_users_all_servers()
-        users_flat = [u for lst in all_dict.values() for u in lst]
-        response = render_template(
-            "tables/user_card.html", users=_group_users_for_display(users_flat)
-        )
-        # Add a script to close the modal after swap
-        response += """
-<script>
-  setTimeout(function() {
-    var modal = document.getElementById('modal');
-    if (modal) modal.classList.add('hidden');
-    var modalUser = document.getElementById('modal-user');
-    if (modalUser) while (modalUser.firstChild) { modalUser.removeChild(modalUser.firstChild); }
-  }, 50);
-</script>
-"""
+        # Close the modal and refresh the user table to preserve filters/sorting
+        response = Response("")
+        response.headers["HX-Trigger"] = "closeModal, refreshUserTable"
         return response
 
     # GET → return modal form
@@ -795,8 +734,8 @@ def accepted_invites_card():
     ``invitation_servers`` association table).
     """
 
-    # Number of entries to display – keep the card compact
-    LIMIT = 6
+    # Number of entries to display – allow up to 13 before scrolling
+    LIMIT = 13
 
     # --- build a sub-query that also covers multi-server invites -------------
     # For invites that target multiple servers, the ``Invitation.used`` flag
@@ -819,7 +758,10 @@ def accepted_invites_card():
         Invitation.query
         # eager-load the user + primary server to avoid N+1 lookup
         .options(
-            db.joinedload(Invitation.used_by),
+            db.joinedload(Invitation.used_by),  # Keep for backward compatibility
+            db.joinedload(
+                Invitation.users
+            ),  # NEW: Load all users who used this invitation
             db.joinedload(Invitation.server),
             db.joinedload(Invitation.servers),
         )
@@ -839,14 +781,12 @@ def accepted_invites_card():
 def server_health_card():
     """Return a card showing health status of all media servers."""
     try:
-        from urllib.parse import urlparse
-
         import requests
 
-        # Look at HX-Current-URL if HTMX, else fall back to url_root
-        current_url = request.headers.get("HX-Current-URL", request.url_root)
-        parsed = urlparse(current_url)
-        base_url = f"{parsed.scheme}://{parsed.netloc}"
+        # Use localhost for internal requests to avoid external domain resolution issues
+        # This prevents connection timeouts when the external domain can't be reached internally
+        server_port = request.environ.get("SERVER_PORT") or "5000"
+        base_url = f"http://127.0.0.1:{server_port}"
 
         response = requests.get(
             f"{base_url}/settings/servers/statistics/all",
@@ -907,4 +847,63 @@ def server_health_card():
     except Exception as e:
         return render_template(
             "admin/server_health_card.html", success=False, error=f"Error: {str(e)}"
+        )
+
+
+@admin_bp.route("/expired-users/table")
+@login_required
+def expired_users_table():
+    """Return a table of expired users for monitoring."""
+    try:
+        expired_users = get_expired_users()
+        return render_template(
+            "tables/expired_user_card.html", expired_users=expired_users
+        )
+    except Exception as e:
+        logging.error(f"Failed to get expired users: {e}")
+        return render_template(
+            "tables/expired_user_card.html", expired_users=[], error=str(e)
+        )
+
+
+@admin_bp.route("/expiring-users/table")
+@login_required
+def expiring_users_table():
+    """Return a table of users expiring within the next week."""
+    try:
+        expiring_users = get_expiring_this_week_users()
+        return render_template(
+            "tables/expiring_user_card.html", expiring_users=expiring_users
+        )
+    except Exception as e:
+        logging.error(f"Failed to get expiring users: {e}")
+        return render_template(
+            "tables/expiring_user_card.html", expiring_users=[], error=str(e)
+        )
+
+
+@admin_bp.route("/hx/users/sync")
+@login_required
+def sync_users():
+    """Sync users from media servers and return success status."""
+    try:
+        server_id = request.args.get("server")
+
+        if server_id:
+            srv = MediaServer.query.get(int(server_id))
+            if srv:
+                list_users_for_server(srv)
+        else:
+            list_users_all_servers()
+
+        # Return empty response with HX-Trigger to refresh the user table
+        response = Response("", status=200)
+        response.headers["HX-Trigger"] = "refreshUserTable"
+        return response
+    except Exception as exc:
+        logging.error("sync users failed: %s", exc)
+        return (
+            '{"status": "error", "message": "Sync failed"}',
+            500,
+            {"Content-Type": "application/json"},
         )

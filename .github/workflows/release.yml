@@ -13,6 +13,8 @@ jobs:
     # ──────────────────── Docker Release Image ────────────────────
     release:
         runs-on: ubuntu-latest
+        # Only run for non-prerelease releases
+        if: ${{ !github.event.release.prerelease }}
         permissions:
             contents: read
             packages: write
@@ -43,6 +45,7 @@ jobs:
                     platforms: linux/amd64,linux/arm64
                     tags: |
                         ghcr.io/${{ github.repository_owner }}/wizarr:latest
+                        ghcr.io/${{ github.repository_owner }}/wizarr:beta
                         ghcr.io/${{ github.repository_owner }}/wizarr:${{ github.event.release.tag_name }}
                     build-args: |
                         APP_VERSION=${{ github.event.release.tag_name }}

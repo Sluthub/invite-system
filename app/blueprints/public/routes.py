@@ -15,10 +15,10 @@ from flask import (
     url_for,
 )
 
-from app.extensions import db
+from app.extensions import db, limiter
 from app.models import Invitation, MediaServer, Settings, User
 from app.services.invites import is_invite_valid
-from app.services.media.plex import handle_oauth_token
+from app.services.media.plex import PlexInvitationError, handle_oauth_token
 
 public_bp = Blueprint("public", __name__)
 
@@ -45,6 +45,7 @@ def favicon():
 
 # ─── Invite link  /j/<code> ─────────────────────────────────────────────────
 @public_bp.route("/j/<code>")
+@limiter.limit("50 per minute")
 def invite(code):
     from app.services.invitation_flow import InvitationFlowManager
 
@@ -55,6 +56,7 @@ def invite(code):
 
 # ─── Unified invitation processing ─────────────────────────────────────────
 @public_bp.route("/invitation/process", methods=["POST"])
+@limiter.limit("20 per minute")
 def process_invitation():
     """Unified route for processing all invitation types"""
     from app.services.invitation_flow import InvitationFlowManager
@@ -67,11 +69,10 @@ def process_invitation():
 
 # ─── POST /join  (Legacy Plex OAuth route - kept for compatibility) ────────
 @public_bp.route("/join", methods=["POST"])
+@limiter.limit("20 per minute")
 def join():
     code = request.form.get("code")
     token = request.form.get("token")
-
-    print("Got Token: ", token)
 
     invitation = None
     if code:
@@ -82,15 +83,37 @@ def join():
         is_invite_valid(code) if code else (False, "No invitation code provided")
     )
     if not valid:
-        # server_name for rendering error
-        name_setting = Settings.query.filter_by(key="server_name").first()
-        server_name = name_setting.value if name_setting else None
+        # Resolve server name for rendering error
+        from app.services.server_name_resolver import resolve_invitation_server_name
+
+        # Try to get servers from invitation for error display
+        servers = []
+        if invitation and invitation.servers:
+            servers = list(invitation.servers)
+        elif invitation and invitation.server:
+            servers = [invitation.server]
+
+        server_name = resolve_invitation_server_name(servers)
 
         return render_template(
-            "user-plex-login.html", name=server_name, code=code, code_error=msg
+            "user-plex-login.html", server_name=server_name, code=code, code_error=msg
         )
 
-    server = (invitation.server if invitation else None) or MediaServer.query.first()
+    # Get the appropriate server for this invitation
+    server = None
+    if invitation:
+        # Prioritize new many-to-many relationship
+        if hasattr(invitation, "servers") and invitation.servers:
+            # For legacy /join route, prioritize Plex servers first (backward compatibility)
+            plex_servers = [s for s in invitation.servers if s.server_type == "plex"]
+            server = plex_servers[0] if plex_servers else invitation.servers[0]
+        # Fallback to legacy single server relationship
+        elif invitation.server:
+            server = invitation.server
+
+    # Final fallback to any server (maintain existing behavior)
+    if not server:
+        server = MediaServer.query.first()
     server_type = server.server_type if server else None
 
     from flask import current_app
@@ -98,7 +121,34 @@ def join():
     if server_type == "plex":
         # run Plex OAuth invite immediately (blocking – we need the DB row afterwards)
         if token and code:
-            handle_oauth_token(current_app, token, code)
+            try:
+                handle_oauth_token(current_app, token, code)
+            except PlexInvitationError as e:
+                # Show user-friendly error message from Plex API
+                name_setting = Settings.query.filter_by(key="server_name").first()
+                server_name = name_setting.value if name_setting else None
+
+                return render_template(
+                    "user-plex-login.html",
+                    server_name=server_name,
+                    code=code,
+                    code_error=f"Plex invitation failed: {e.message}",
+                )
+            except Exception as e:
+                # Handle any other unexpected errors
+                import logging
+
+                logging.error(f"Unexpected error during Plex OAuth: {e}")
+
+                name_setting = Settings.query.filter_by(key="server_name").first()
+                server_name = name_setting.value if name_setting else None
+
+                return render_template(
+                    "user-plex-login.html",
+                    server_name=server_name,
+                    code=code,
+                    code_error="An unexpected error occurred during invitation. Please try again or contact support.",
+                )
 
         # Determine if there are additional servers attached to the invite
         extra = [
@@ -124,8 +174,34 @@ def join():
         "kavita",
         "komga",
     ):
+        from app.forms.join import JoinForm
+
+        # Get server name for the invitation using the new resolver if available
+        try:
+            from app.services.server_name_resolver import resolve_invitation_server_name
+
+            servers = []
+            if invitation and invitation.servers:
+                servers = list(invitation.servers)
+            elif invitation and invitation.server:
+                servers = [invitation.server]
+            elif server:
+                servers = [server]
+
+            server_name = resolve_invitation_server_name(servers)
+        except ImportError:
+            # Fallback to legacy approach if resolver not available
+            name_setting = Settings.query.filter_by(key="server_name").first()
+            server_name = name_setting.value if name_setting else "Media Server"
+
+        form = JoinForm()
+        form.code.data = code
         return render_template(
-            "welcome-jellyfin.html", code=code, server_type=server_type
+            "welcome-jellyfin.html",
+            code=code,
+            server_type=server_type,
+            server_name=server_name,
+            form=form,
         )
 
     # fallback if server_type missing/unsupported
@@ -136,6 +212,58 @@ def join():
 def health():
     # If you need to check DB connectivity, do it here.
     return jsonify(status="ok"), 200
+
+
+@public_bp.route("/cinema-posters")
+def cinema_posters():
+    """Get movie poster URLs for cinema background display."""
+    try:
+        import time
+
+        from flask import current_app
+
+        from app.models import MediaServer
+        from app.services.media.service import get_client_for_media_server
+
+        # Cache key for poster URLs
+        cache_key = "cinema_posters"
+        cache_duration = 1800  # 30 minutes
+
+        # Check cache first
+        cached_data = current_app.config.get("POSTER_CACHE", {})
+        cached_entry = cached_data.get(cache_key)
+
+        if cached_entry and (time.time() - cached_entry["timestamp"]) < cache_duration:
+            return jsonify(cached_entry["data"])
+
+        # Get the primary media server (or first available)
+        server = MediaServer.query.first()
+        if not server:
+            return jsonify([])
+
+        # Get media client for the server
+        client = get_client_for_media_server(server)
+
+        # Check if client has get_movie_posters method
+        poster_urls = []
+        if hasattr(client, "get_movie_posters"):
+            poster_urls = client.get_movie_posters(limit=80)
+
+        # Cache the results
+        if "POSTER_CACHE" not in current_app.config:
+            current_app.config["POSTER_CACHE"] = {}
+        current_app.config["POSTER_CACHE"][cache_key] = {
+            "data": poster_urls,
+            "timestamp": time.time(),
+        }
+
+        return jsonify(poster_urls)
+
+    except Exception as e:
+        import logging
+
+        logging.warning(f"Failed to fetch cinema posters: {e}")
+        return jsonify([])
 
 
 @public_bp.route("/static/manifest.json")
@@ -188,8 +316,11 @@ def password_prompt(code):
             )
 
         # Provision accounts on remaining servers
+        from app.services.expiry import calculate_user_expiry
         from app.services.invites import mark_server_used
         from app.services.media.service import get_client_for_media_server
+
+        # Calculate expiry will be done per-server to allow server-specific expiry
 
         for srv in invitation.servers:
             if srv.server_type == "plex":
@@ -214,13 +345,17 @@ def password_prompt(code):
 
                 # set library permissions (simplified: full access)
 
-                # store local DB row
+                # Calculate server-specific expiry for this user
+                user_expires = calculate_user_expiry(invitation, srv.id)
+
+                # store local DB row with proper expiry
                 new_user = User()
                 new_user.username = username
                 new_user.email = email
                 new_user.token = uid
                 new_user.code = code
                 new_user.server_id = srv.id
+                new_user.expires = user_expires  # Set expiry based on invitation duration (server-specific)
                 db.session.add(new_user)
                 db.session.commit()
 
@@ -249,12 +384,50 @@ def image_proxy():
     # rudimentary security – allow only http/https
     if not url.startswith(("http://", "https://")):
         return Response(status=400)
+
+    # Server-side image cache
+    import hashlib
+    import time
+
+    from flask import current_app
+
+    # Create cache key from URL
+    cache_key = f"img_{hashlib.md5(url.encode()).hexdigest()}"
+    cache_duration = 3600  # 1 hour
+
+    # Check cache first
+    cached_data = current_app.config.get("IMAGE_CACHE", {})
+    cached_entry = cached_data.get(cache_key)
+
+    if cached_entry and (time.time() - cached_entry["timestamp"]) < cache_duration:
+        resp = Response(cached_entry["data"], content_type=cached_entry["content_type"])
+        resp.headers["Cache-Control"] = "public, max-age=3600"
+        return resp
+
     try:
-        r = requests.get(url, timeout=10, stream=True)
+        r = requests.get(url, timeout=5, stream=True)  # Reduced timeout from 10s to 5s
         r.raise_for_status()
         content_type = r.headers.get("Content-Type", "image/jpeg")
-        resp = Response(r.content, content_type=content_type)
-        # cache 1h
+        image_data = r.content
+
+        # Cache the image data
+        if "IMAGE_CACHE" not in current_app.config:
+            current_app.config["IMAGE_CACHE"] = {}
+        current_app.config["IMAGE_CACHE"][cache_key] = {
+            "data": image_data,
+            "content_type": content_type,
+            "timestamp": time.time(),
+        }
+
+        # Clean up old cache entries (simple LRU)
+        if len(current_app.config["IMAGE_CACHE"]) > 200:  # Keep max 200 images
+            oldest_key = min(
+                current_app.config["IMAGE_CACHE"].keys(),
+                key=lambda k: current_app.config["IMAGE_CACHE"][k]["timestamp"],
+            )
+            del current_app.config["IMAGE_CACHE"][oldest_key]
+
+        resp = Response(image_data, content_type=content_type)
         resp.headers["Cache-Control"] = "public, max-age=3600"
         return resp
     except Exception:

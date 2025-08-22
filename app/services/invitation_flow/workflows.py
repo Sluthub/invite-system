@@ -10,6 +10,7 @@ from flask import session
 
 from app.models import Invitation, MediaServer
 from app.services.media.service import get_client_for_media_server
+from app.services.ombi_client import invite_user_to_connections
 
 from .results import InvitationResult, ProcessingStatus, ServerResult
 from .strategies import StrategyFactory
@@ -65,6 +66,48 @@ class InvitationWorkflow(ABC):
 
                 if ok:
                     successful.append(result)
+
+                    # Mark invitation as used for this server
+                    from app.models import Invitation
+                    from app.services.invites import mark_server_used
+
+                    invitation = Invitation.query.filter_by(
+                        code=invitation_code
+                    ).first()
+                    if invitation:
+                        # Find the user that was created for this server
+                        from app.models import User
+
+                        user = User.query.filter_by(
+                            code=invitation_code, server_id=server.id
+                        ).first()
+                        if user:
+                            invitation.used_by = user  # type: ignore[assignment]
+                        mark_server_used(invitation, server.id, user)
+
+                    # Invite user to connected external services (Ombi/Overseerr)
+                    try:
+                        connection_results = invite_user_to_connections(
+                            username=form_data.get("username", ""),
+                            email=form_data.get("email", ""),
+                            server_id=server.id,
+                            password=form_data.get("password", ""),
+                        )
+
+                        # Log connection results for debugging
+                        for conn_result in connection_results:
+                            if conn_result["status"] == "success":
+                                self.logger.info(
+                                    f"User {form_data.get('username')} invited to {conn_result['connection_name']}"
+                                )
+                            elif conn_result["status"] == "error":
+                                self.logger.warning(
+                                    f"Failed to invite user to {conn_result['connection_name']}: {conn_result['message']}"
+                                )
+                    except Exception as e:
+                        self.logger.error(
+                            f"Error inviting user to connections for server {server.name}: {e}"
+                        )
                 else:
                     failed.append(result)
 
@@ -103,7 +146,10 @@ class InvitationWorkflow(ABC):
             successful_servers=successful,
             failed_servers=failed,
             redirect_url="/wizard/",
-            session_data={"wizard_access": invitation_code},
+            session_data={
+                "wizard_access": invitation_code,
+                "invitation_in_progress": True,
+            },
         )
 
 
@@ -115,6 +161,7 @@ class FormBasedWorkflow(InvitationWorkflow):
     ) -> InvitationResult:
         """Show form-based authentication form."""
         from app.forms.join import JoinForm
+        from app.services.server_name_resolver import resolve_invitation_server_name
 
         form = JoinForm()
         form.code.data = invitation.code
@@ -122,6 +169,9 @@ class FormBasedWorkflow(InvitationWorkflow):
         # Determine primary server type for UI
         primary_server = servers[0] if servers else None
         server_type = primary_server.server_type if primary_server else "jellyfin"
+
+        # Resolve the server name to display
+        server_name = resolve_invitation_server_name(servers)
 
         return InvitationResult(
             status=ProcessingStatus.AUTHENTICATION_REQUIRED,
@@ -132,8 +182,10 @@ class FormBasedWorkflow(InvitationWorkflow):
                 "template_name": "welcome-jellyfin.html",
                 "form": form,
                 "server_type": server_type,
+                "server_name": server_name,
                 "servers": servers,
             },
+            session_data={"invitation_in_progress": True},
         )
 
     def process_submission(
@@ -164,12 +216,16 @@ class FormBasedWorkflow(InvitationWorkflow):
     ) -> InvitationResult:
         """Create result for authentication errors."""
         from app.forms.join import JoinForm
+        from app.services.server_name_resolver import resolve_invitation_server_name
 
         form = JoinForm()
         form.code.data = invitation.code
 
         primary_server = servers[0] if servers else None
         server_type = primary_server.server_type if primary_server else "jellyfin"
+
+        # Resolve the server name to display
+        server_name = resolve_invitation_server_name(servers)
 
         return InvitationResult(
             status=ProcessingStatus.FAILURE,
@@ -180,9 +236,11 @@ class FormBasedWorkflow(InvitationWorkflow):
                 "template_name": "welcome-jellyfin.html",
                 "form": form,
                 "server_type": server_type,
+                "server_name": server_name,
                 "servers": servers,
                 "error": error_message,
             },
+            session_data={"invitation_in_progress": True},
         )
 
     def _create_server_error_result(
@@ -193,12 +251,16 @@ class FormBasedWorkflow(InvitationWorkflow):
     ) -> InvitationResult:
         """Create result for server failures."""
         from app.forms.join import JoinForm
+        from app.services.server_name_resolver import resolve_invitation_server_name
 
         form = JoinForm()
         form.code.data = invitation.code
 
         primary_server = servers[0] if servers else None
         server_type = primary_server.server_type if primary_server else "jellyfin"
+
+        # Resolve the server name to display
+        server_name = resolve_invitation_server_name(servers)
 
         error_messages = [
             f"{result.server.name}: {result.message}" for result in failed
@@ -214,9 +276,11 @@ class FormBasedWorkflow(InvitationWorkflow):
                 "template_name": "welcome-jellyfin.html",
                 "form": form,
                 "server_type": server_type,
+                "server_name": server_name,
                 "servers": servers,
                 "error": error_text,
             },
+            session_data={"invitation_in_progress": True},
         )
 
 
@@ -227,6 +291,11 @@ class PlexOAuthWorkflow(InvitationWorkflow):
         self, invitation: Invitation, servers: list[MediaServer]
     ) -> InvitationResult:
         """Show Plex OAuth form."""
+        # Get server name (prefer invitation's primary server, fallback to first server or Settings)
+        server_name = None
+        if servers:
+            server_name = servers[0].name
+
         return InvitationResult(
             status=ProcessingStatus.OAUTH_PENDING,
             message="Plex OAuth authentication required",
@@ -236,7 +305,9 @@ class PlexOAuthWorkflow(InvitationWorkflow):
                 "template_name": "user-plex-login.html",
                 "code": invitation.code,
                 "oauth_url": f"/oauth/plex?code={invitation.code}",
+                "server_name": server_name,
             },
+            session_data={"invitation_in_progress": True},
         )
 
     def process_submission(
@@ -268,6 +339,11 @@ class PlexOAuthWorkflow(InvitationWorkflow):
         self, invitation: Invitation, error_message: str
     ) -> InvitationResult:
         """Create result for OAuth errors."""
+        # Get server name from invitation
+        server_name = None
+        if invitation.servers:
+            server_name = invitation.servers[0].name
+
         return InvitationResult(
             status=ProcessingStatus.FAILURE,
             message=error_message,
@@ -277,7 +353,9 @@ class PlexOAuthWorkflow(InvitationWorkflow):
                 "template_name": "user-plex-login.html",
                 "code": invitation.code,
                 "error": error_message,
+                "server_name": server_name,
             },
+            session_data={"invitation_in_progress": True},
         )
 
 
@@ -293,6 +371,14 @@ class MixedWorkflow(InvitationWorkflow):
 
         if not plex_token:
             # Start with Plex OAuth
+            # Get server name from servers (prefer plex server)
+            server_name = None
+            plex_server = next((s for s in servers if s.server_type == "plex"), None)
+            if plex_server:
+                server_name = plex_server.name
+            elif servers:
+                server_name = servers[0].name
+
             return InvitationResult(
                 status=ProcessingStatus.OAUTH_PENDING,
                 message="Plex OAuth authentication required",
@@ -302,7 +388,9 @@ class MixedWorkflow(InvitationWorkflow):
                     "template_name": "user-plex-login.html",
                     "code": invitation.code,
                     "oauth_url": f"/oauth/plex?code={invitation.code}",
+                    "server_name": server_name,
                 },
+                session_data={"invitation_in_progress": True},
             )
 
         if other_servers:
@@ -319,6 +407,7 @@ class MixedWorkflow(InvitationWorkflow):
                     "plex_token": plex_token,
                     "local_servers": other_servers,
                 },
+                session_data={"invitation_in_progress": True},
             )
 
         # Only Plex servers, proceed with processing

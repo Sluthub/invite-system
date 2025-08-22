@@ -1,17 +1,20 @@
 from __future__ import annotations
 
+import base64
 import datetime
 import logging
 import re
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from app.services.media.user_details import MediaUserDetails
 
 import requests
 from sqlalchemy import or_
 
 from app.extensions import db
 from app.models import Invitation, User
-from app.services.invites import is_invite_valid, mark_server_used
-from app.services.notifications import notify
+from app.services.invites import is_invite_valid
 
 from .client_base import RestApiMixin, register_media_client
 
@@ -64,18 +67,13 @@ class RommClient(RestApiMixin):
     # ------------------------------------------------------------------
 
     def libraries(self) -> dict[str, str]:
-        """Return mapping ``platform_id`` → ``display_name``.
-
-        RomM's *platforms* endpoint returns JSON like::
-
-            [ {"id": "nes", "name": "Nintendo Entertainment System", ...}, ... ]
-        """
+        """Return mapping of platform_id → display_name."""
         try:
-            r = self.get(f"{self.API_PREFIX}/platforms")
-            data: list[dict[str, Any]] = r.json()
+            response = self.get(f"{self.API_PREFIX}/platforms")
+            data: list[dict[str, Any]] = response.json()
             return {p["id"]: p.get("name", p["id"]) for p in data}
-        except Exception as exc:  # noqa: BLE001
-            logging.warning("ROMM: failed to fetch platforms – %s", exc)
+        except Exception as exc:
+            logging.warning("RomM: failed to fetch platforms – %s", exc)
             return {}
 
     def scan_libraries(
@@ -90,13 +88,8 @@ class RommClient(RestApiMixin):
         Returns:
             dict: Platform name -> platform ID mapping
         """
-        import base64
-
-        import requests
-
-        if url and token:
-            # Use override credentials for scanning
-            try:
+        try:
+            if url and token:
                 # RomM uses basic auth with token as password
                 auth_header = base64.b64encode(f"admin:{token}".encode()).decode()
                 headers = {"Authorization": f"Basic {auth_header}"}
@@ -105,23 +98,15 @@ class RommClient(RestApiMixin):
                 )
                 response.raise_for_status()
                 data = response.json()
-            except Exception as e:
-                logging.error(
-                    f"Failed to scan RomM platforms with override credentials: {e}"
-                )
-                return {}
-        else:
-            # Use saved credentials
-            try:
-                r = self.get(f"{self.API_PREFIX}/platforms")
-                data = r.json()
-            except Exception as e:
-                logging.error(
-                    f"Failed to get RomM platforms with saved credentials: {e}"
-                )
-                return {}
+            else:
+                # Use saved credentials
+                response = self.get(f"{self.API_PREFIX}/platforms")
+                data = response.json()
 
-        return {p.get("name", p["id"]): p["id"] for p in data}
+            return {p.get("name", p["id"]): p["id"] for p in data}
+        except Exception as e:
+            logging.warning("RomM: failed to scan platforms – %s", e)
+            return {}
 
     # ------------------------------------------------------------------
     # Wizarr API – users (read-only)
@@ -192,9 +177,18 @@ class RommClient(RestApiMixin):
                 db.session.delete(local)
         db.session.commit()
 
-        return User.query.filter(
+        # Get users with default policy information
+        users = User.query.filter(
             User.server_id == getattr(self, "server_id", None)
         ).all()
+
+        # Add default policy attributes (RomM doesn't have specific download/live TV policies)
+        for user in users:
+            user.allow_downloads = True  # Default to True for gaming apps
+            user.allow_live_tv = False  # RomM doesn't have Live TV
+            user.allow_sync = True  # Default to True for gaming apps
+
+        return users
 
     # ------------------------------------------------------------------
     # Un-implemented mutating operations
@@ -264,8 +258,56 @@ class RommClient(RestApiMixin):
             resp.raise_for_status()
 
     def get_user(self, user_id: str) -> dict[str, Any]:
+        """Get user info in legacy format for backward compatibility."""
+        details = self.get_user_details(user_id)
+        return {
+            "id": details.user_id,
+            "username": details.username,
+            "email": details.email,
+            "role": "ADMIN" if details.is_admin else "VIEWER",
+            "enabled": details.is_enabled,
+            "created_at": details.created_at.isoformat() + "Z"
+            if details.created_at
+            else None,
+        }
+
+    def get_user_details(self, user_id: str) -> MediaUserDetails:
+        """Get detailed user information in standardized format."""
+        from app.models import Library
+        from app.services.media.user_details import MediaUserDetails, UserLibraryAccess
+
+        # Get raw user data from RomM API
         r = self.get(f"{self.API_PREFIX}/users/{user_id}")
-        return r.json()
+        raw_user = r.json()
+
+        # Get all available libraries for this server since RomM gives full access
+        libs_q = (
+            Library.query.filter_by(server_id=self.server_id, enabled=True)
+            .order_by(Library.name)
+            .all()
+        )
+        library_access = [
+            UserLibraryAccess(
+                library_id=lib.external_id, library_name=lib.name, has_access=True
+            )
+            for lib in libs_q
+        ]
+
+        return MediaUserDetails(
+            user_id=str(raw_user.get("id", user_id)),
+            username=raw_user.get("username", "Unknown"),
+            email=raw_user.get("email"),
+            is_admin=raw_user.get("role") == "ADMIN",
+            is_enabled=raw_user.get("enabled", True),
+            created_at=datetime.datetime.fromisoformat(
+                raw_user["created_at"].rstrip("Z")
+            )
+            if raw_user.get("created_at")
+            else None,
+            last_active=None,  # RomM doesn't track last active time
+            library_access=library_access,
+            raw_policies=raw_user,
+        )
 
     # ------------------------------------------------------------------
     # Public sign-up via invites (same contract as other clients)
@@ -345,9 +387,8 @@ class RommClient(RestApiMixin):
                 "error": str(e),
             }
 
-    def join(
+    def _do_join(
         self,
-        *,
         username: str,
         password: str,
         confirm: str,
@@ -358,8 +399,8 @@ class RommClient(RestApiMixin):
 
         if not EMAIL_RE.fullmatch(email):
             return False, "Invalid e-mail address."
-        if not 8 <= len(password) <= 20:
-            return False, "Password must be 8–20 characters."
+        if not 8 <= len(password) <= 128:
+            return False, "Password must be 8–128 characters."
         if password != confirm:
             return False, "Passwords do not match."
 
@@ -385,12 +426,15 @@ class RommClient(RestApiMixin):
             # (viewers can see everything).  We therefore don't attempt to
             # filter library access yet – we only need the DB linkage.
 
-            expires = None
-            if inv and inv.duration:
-                days = int(inv.duration)
-                expires = datetime.datetime.utcnow() + datetime.timedelta(days=days)
+            from app.services.expiry import calculate_user_expiry
 
-            new_user = self._create_user_with_identity_linking(
+            expires = (
+                calculate_user_expiry(inv, getattr(self, "server_id", None))
+                if inv
+                else None
+            )
+
+            self._create_user_with_identity_linking(
                 {
                     "username": username,
                     "email": email,
@@ -401,17 +445,6 @@ class RommClient(RestApiMixin):
                 }
             )
             db.session.commit()
-
-            # mark invite used
-            if inv:
-                inv.used_by = new_user
-                server_id = getattr(new_user, "server_id", None)
-                if server_id is not None:
-                    mark_server_used(inv, server_id)
-
-            notify(
-                "New User", f"User {username} has joined your server! 🎉", tags="tada"
-            )
 
             return True, ""
 

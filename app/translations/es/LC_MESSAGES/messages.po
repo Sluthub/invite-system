@@ -8,8 +8,8 @@ msgstr ""
 "Project-Id-Version: PROJECT VERSION\n"
 "Report-Msgid-Bugs-To: EMAIL@ADDRESS\n"
 "POT-Creation-Date: 2025-05-24 18:39+0000\n"
-"PO-Revision-Date: 2025-07-15 20:01+0000\n"
-"Last-Translator: Vittat <ruben.cruz89@gmail.com>\n"
+"PO-Revision-Date: 2025-08-21 12:02+0000\n"
+"Last-Translator: Elkin Torres <elkinjosetm@gmail.com>\n"
 "Language-Team: Spanish <https://hosted.weblate.org/projects/wizarr/"
 "wizarr-universal/es/>\n"
 "Language: es\n"
@@ -17,13 +17,12 @@ msgstr ""
 "Content-Type: text/plain; charset=utf-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=n != 1;\n"
-"X-Generator: Weblate 5.13-dev\n"
+"X-Generator: Weblate 5.13\n"
 "Generated-By: Babel 2.17.0\n"
 
 #: app/blueprints/auth/routes.py:44
-#, fuzzy
 msgid "Invalid username or password"
-msgstr "Usuario o contraseña no válidos"
+msgstr "Usuario o contraseña inválidos"
 
 #: app/blueprints/settings/routes.py:131
 msgid "Library scan failed"
@@ -50,9 +49,8 @@ msgid "Settings"
 msgstr "Ajustes"
 
 #: app/templates/invalid-invite.html:16
-#, fuzzy
 msgid "Invalid Invitation"
-msgstr "Invitaciones"
+msgstr "Invitación inválida"
 
 #: app/templates/login.html:18
 msgid "Login"
@@ -75,13 +73,12 @@ msgid "Sign in"
 msgstr "Iniciar sesión"
 
 #: app/templates/settings.html:13
-#, fuzzy
 msgid "Server settings"
 msgstr "Ajustes del servidor"
 
 #: app/templates/settings.html:22
 msgid "Notification agents"
-msgstr ""
+msgstr "Agentes de notificaciones"
 
 #: app/templates/user-plex-login.html:7 app/templates/user-plex-login.html:14
 #: app/templates/welcome-jellyfin.html:7 app/templates/welcome-jellyfin.html:14
@@ -185,9 +182,8 @@ msgid "Unlimited Usages"
 msgstr "Usos ilimitados"
 
 #: app/templates/admin/invite.html:53
-#, fuzzy
 msgid "Invite to Plex Home"
-msgstr "Código de invitación"
+msgstr "Invitar a Plex Home"
 
 #: app/templates/admin/invite.html:62 app/templates/admin/invite.html:79
 #: app/templates/tables/invite_card.html:86
@@ -215,9 +211,8 @@ msgstr ""
 
 #: app/templates/admin/invite.html:96 app/templates/tables/invite_card.html:96
 #: app/templates/tables/user_card.html:67
-#, fuzzy
 msgid "Allow Downloads"
-msgstr "Descargar"
+msgstr "Permitir descargas"
 
 #: app/templates/admin/invite.html:102
 msgid ""
@@ -296,58 +291,51 @@ msgstr " Algo ha ido mal. Por favor, prueba de nuevo más tarde."
 
 #: app/templates/modals/create-notification-agent.html:31
 msgid "New Agent"
-msgstr ""
+msgstr "Nuevo Agente"
 
 #: app/templates/modals/create-notification-agent.html:60
-#, fuzzy
 msgid ""
 "Username\n"
 "                                (optional)"
 msgstr ""
-"Código\n"
-"                                de invitación"
+"Nombre de usuario\n"
+"                                (opcional)"
 
 #: app/templates/modals/create-notification-agent.html:65
-#, fuzzy
 msgid "Password (optional)"
-msgstr "(opcional)"
+msgstr "Contraseña (opcional)"
 
 #: app/templates/modals/create-notification-agent.html:70
-#, fuzzy
 msgid ""
 "Agent\n"
 "                                URL"
 msgstr ""
-"Código\n"
-"                                de invitación"
+"Agente\n"
+"                                URL"
 
 #: app/templates/modals/create-notification-agent.html:81
 msgid "Test & Create Agent"
-msgstr ""
+msgstr "Probar & Crear Agente"
 
 #: app/templates/settings/index.html:24
-#, fuzzy
 msgid "Server"
-msgstr "Nunca"
+msgstr "Servidor"
 
 #: app/templates/settings/index.html:39
-#, fuzzy
 msgid "Notifications"
-msgstr "Invitaciones"
+msgstr "Notificaciones"
 
 #: app/templates/settings/notifications.html:11
 msgid "Notification Agents"
-msgstr ""
+msgstr "Agentes de Notificaciones"
 
 #: app/templates/settings/notifications.html:27
-#, fuzzy
 msgid "Delete"
-msgstr "Predeterminado"
+msgstr "Borrar"
 
 #: app/templates/settings/notifications.html:37
-#, fuzzy
 msgid "Create Agent"
-msgstr "Crear una cuenta"
+msgstr "Crear Agente"
 
 #: app/templates/settings/partials/server_form.html:13
 msgid "Server Settings"
@@ -398,9 +386,8 @@ msgid "Default"
 msgstr "Predeterminado"
 
 #: app/templates/tables/invite_card.html:86
-#, fuzzy
 msgid "days"
-msgstr "Un día"
+msgstr "Días"
 
 #: app/templates/tables/invite_card.html:106
 msgid "Unlimited"
@@ -411,7 +398,6 @@ msgid "There are currently no users."
 msgstr "Actualmente no hay usuarios."
 
 #: app/templates/tables/user_card.html:26
-#, fuzzy
 msgid "Home User"
 msgstr "Inicio"
 

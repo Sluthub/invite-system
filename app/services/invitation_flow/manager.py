@@ -100,16 +100,24 @@ class InvitationFlowManager:
         """Get servers associated with invitation (same logic as existing system)."""
         servers = []
 
-        # Check new many-to-many relationship
+        # Check new many-to-many relationship first
         if hasattr(invitation, "servers") and invitation.servers:
-            servers = list(invitation.servers)
+            try:
+                # Cast to Any to work around type checking issues with SQLAlchemy relationships
+                from typing import Any, cast
+
+                servers_iter = cast(Any, invitation.servers)
+                servers = list(servers_iter)
+            except (TypeError, AttributeError):
+                # Fallback if servers is not iterable
+                servers = []
 
         # Fallback to legacy single server relationship
-        elif hasattr(invitation, "server") and invitation.server:
+        if not servers and hasattr(invitation, "server") and invitation.server:
             servers = [invitation.server]
 
         # Final fallback to first available server
-        else:
+        if not servers:
             default_server = MediaServer.query.first()
             if default_server:
                 servers = [default_server]
@@ -128,4 +136,5 @@ class InvitationFlowManager:
             successful_servers=[],
             failed_servers=[],
             template_data={"template_name": "invalid-invite.html", "error": message},
+            session_data={"invitation_in_progress": True},
         )

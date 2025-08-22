@@ -1,22 +1,53 @@
 
+# Development files
 .venv
 venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Environment files
 .env
+.env.*
+
+# OS files
 .DS_Store
-.gitignore
+Thumbs.db
+
+# Git and development tools
 .git
+.github
+.gitignore
 .idea
+.vscode
 .buildHelper.txt
+
+# Test and development data
 test-data/
-# All hidden files
-.*
+tests/
+.pytest_cache
+.coverage
+htmlcov/
 
-Dockerfile
-README.md
-babel.cfg
-unraid.xml
-
+# Documentation and helpers
 screenshots/
 docs/
 helpers/
+README.md
+unraid.xml
+
+# Node modules (handled separately in multi-stage build)
+node_modules/
+
+# Built assets (external dependencies will be built in container)
+app/static/css/main.css
+app/static/js/sortable.min.js
+app/static/js/tiny-mde.min.js
+app/static/css/tiny-mde.min.css
+
+# Hidden files (except those we need)
+.*
+!.dockerignore
 

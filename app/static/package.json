@@ -1,27 +1,27 @@
 {
-  "name": "wizarr",
-  "version": "1.0.0",
-  "description": "Wizarr",
-  "scripts": {
-    "build:css": "npx @tailwindcss/cli -i src/style.css -o css/main.css",
-    "watch:css": "npx @tailwindcss/cli -i src/style.css -o css/main.css --watch",
-    "build:js": "cp node_modules/sortablejs/Sortable.min.js js/sortable.min.js && cp node_modules/tiny-markdown-editor/dist/tiny-mde.min.js js/tiny-mde.min.js && cp node_modules/tiny-markdown-editor/dist/tiny-mde.min.css css/tiny-mde.min.css",
-    "build": "npm run build:css && npm run build:js"
-  },
-  "author": "",
-  "license": "ISC",
-  "devDependencies": {
-    "@tailwindcss/cli": "^4.1.11",
-    "@tailwindcss/typography": "^0.5.16",
-    "tailwindcss": "^4.1.11"
-  },
-  "dependencies": {
-    "@alpinejs/collapse": "^3.14.9",
-    "alpinejs": "^3.14.9",
-    "animate.css": "^4.1.1",
-    "flowbite": "^3.1.2",
-    "htmx.org": "^2.0.6",
-    "sortablejs": "^1.15.0",
-    "tiny-markdown-editor": "^0.2.1"
-  }
+    "name": "wizarr",
+    "version": "1.0.0",
+    "description": "Wizarr",
+    "scripts": {
+        "build:css": "npx @tailwindcss/cli -i src/style.css -o css/main.css",
+        "watch:css": "npx @tailwindcss/cli -i src/style.css -o css/main.css --watch",
+        "build:js": "cp node_modules/sortablejs/Sortable.min.js js/sortable.min.js && cp node_modules/tiny-markdown-editor/dist/tiny-mde.min.js js/tiny-mde.min.js && cp node_modules/tiny-markdown-editor/dist/tiny-mde.min.css css/tiny-mde.min.css",
+        "build": "npm run build:css && npm run build:js"
+    },
+    "author": "",
+    "license": "ISC",
+    "devDependencies": {
+        "@tailwindcss/cli": "^4.1.12",
+        "@tailwindcss/typography": "^0.5.16",
+        "tailwindcss": "^4.1.12"
+    },
+    "dependencies": {
+        "@alpinejs/collapse": "^3.14.9",
+        "alpinejs": "^3.14.9",
+        "animate.css": "^4.1.1",
+        "flowbite": "^3.1.2",
+        "htmx.org": "^2.0.6",
+        "sortablejs": "^1.15.0",
+        "tiny-markdown-editor": "^0.2.2"
+    }
 }

@@ -111,7 +111,6 @@ def server_settings():
 
     if form.validate_on_submit():
         data = form.data.copy()
-        data.pop("csrf_token", None)
 
         chosen = set(request.form.getlist("libraries"))
         # Only update enabled state if at least one library is selected
@@ -168,7 +167,7 @@ def server_settings():
         if setup_mode:
             # Only mark setup complete and redirect if this is the first server
             if MediaServer.query.count() == 1:
-                print("Setup mode: redirecting to dashboard (first server added)")
+                # Setup complete: first server added, redirect to dashboard
                 session.pop("in_setup", None)
 
             # HTMX requests honour HX-Redirect header, regular form POSTs need a
@@ -267,7 +266,6 @@ def general_settings():
     )
     if form.validate_on_submit():
         data = form.data.copy()
-        data.pop("csrf_token", None)
         _save_settings(data)
         flash(_("Settings saved successfully!"), "success")
     if request.headers.get("HX-Request"):

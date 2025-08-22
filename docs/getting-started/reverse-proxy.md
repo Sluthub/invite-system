@@ -32,17 +32,16 @@ server {
 {% tab title="Nginx Proxy Manager" %}
 Add a new proxy host with the following settings:
 
-**Details**
+#### Details
 
 * **Domain Names:** Your desired external wizarr hostname; e.g., `wizarr.example.com`
 * **Scheme:** `http`
 * **Forward Hostname / IP:** Internal wizarr hostname or IP
 * **Forward Port:** `5690`
 * **Cache Assets:** yes
-* **Block Common Exploits:** yes
-* **Websocket Support:** yes
+* **Block Common Exploits:** no 
 
-**SSL**
+#### SSL
 
 * **SSL Certificate:** Select one of the options; if you are not sure, pick “Request a new SSL Certificate”
 * **Force SSL:** yes
@@ -56,30 +55,29 @@ Add the following configuration to a new file `/etc/nginx/sites-available/wizarr
 server {
     listen 80;
     server_name wizarr.example.com;
-    # Do not modify the line below as it is built from the directive above
     return 301 https://$server_name$request_uri;
 }
 
 server {
-    listen 443 ssl;
-    http2 on;
+    listen 443 ssl http2;
     server_name wizarr.example.com;
 
     ssl_certificate /etc/letsencrypt/live/wizarr.example.com/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/wizarr.example.com/privkey.pem;
 
+    proxy_set_header Referer $http_referer;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Real-Port $remote_port;
+    proxy_set_header X-Forwarded-Host $host:$remote_port;
+    proxy_set_header X-Forwarded-Server $host;
+    proxy_set_header X-Forwarded-Port $remote_port;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-Ssl on;
+
     location / {
         proxy_pass http://127.0.0.1:5690;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "Upgrade";
-        proxy_set_header Host $http_host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $remote_addr;
-        proxy_set_header X-Forwarded-Port $server_port;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_redirect off;
-        proxy_buffering off;
     }
 }
 ```
@@ -142,9 +140,9 @@ plex.example.com {
             "scan=\"/"      "href=\"/wizarr/"
             "/scan"         "/wizarr/scan"
             # include in join code path copy
-            "navigator.clipboard.writeText(url + \"/i/\" + invite_code);" "navigator.clipboard.writeText(url + \"/wizarr/i/\" + invite_code);"
+            "navigator.clipboard.writeText(url + \"/j/\" + invite_code);" "navigator.clipboard.writeText(url + \"/wizarr/j/\" + invite_code);"
         }
-
+        
         # Your wizarr backend
         reverse_proxy http://127.0.0.1:5690
     }
@@ -152,5 +150,7 @@ plex.example.com {
     reverse_proxy http://127.0.0.1:5055
 }
 ```
+
+
 {% endtab %}
 {% endtabs %}
