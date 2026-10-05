@@ -31,7 +31,7 @@ RUN npx nx build wizarr-backend
 RUN npx nx build wizarr-frontend
 
 # Final image for Docker Image
-FROM --platform=$TARGETPLATFORM python:3.12.0 AS final
+FROM --platform=$TARGETPLATFORM python:3.14.8 AS final
 
 # Install system dependencies
 RUN apt-get update && \
