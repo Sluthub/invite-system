@@ -1,5 +1,5 @@
 # Build image for Docker Image
-FROM --platform=$TARGETPLATFORM python:3.12.0
+FROM --platform=$TARGETPLATFORM python:3.14.8
 
 # Install system dependencies
 RUN apt-get update && \
