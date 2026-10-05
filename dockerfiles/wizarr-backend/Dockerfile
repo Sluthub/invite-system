@@ -26,7 +26,7 @@ RUN npm install -g npm@9.8.1 && \
 RUN npx nx build wizarr-backend
 
 # Final image for Docker Image
-FROM --platform=$TARGETPLATFORM python:3.12.0 AS final
+FROM --platform=$TARGETPLATFORM python:3.14.8 AS final
 
 # Install system dependencies
 RUN apt-get update && \
