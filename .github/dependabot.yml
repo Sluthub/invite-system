@@ -1,17 +1,90 @@
-# To get started with Dependabot version updates, you'll need to specify which
-# package ecosystems to update and where the package manifests are located.
-# Please see the documentation for all configuration options:
-# https://docs.github.com/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
-
 version: 2
 updates:
-  - package-ecosystem: "uv"
-    directory: "/"
-    schedule:
-      interval: "weekly"
-  - package-ecosystem: "npm"
-    # Look for `package.json` and `lock` files in the `root` directory
-    directory: "/app/static"
-    # Check the npm registry for updates every day (weekdays)
-    schedule:
-      interval: "daily"
+- package-ecosystem: npm
+  directories:
+  - /app/static
+  - /apps/wizarr-frontend
+  - /modules/semantic-release-discord
+  - /modules/semantic-release-sentry-releases
+  - /
+  schedule:
+    interval: daily
+    time: 04:00
+    timezone: Europe/Berlin
+  open-pull-requests-limit: 2
+  rebase-strategy: auto
+  commit-message:
+    prefix: '[chore] deps'
+  cooldown:
+    default-days: 1
+    semver-major-days: 7
+    semver-minor-days: 3
+    semver-patch-days: 1
+- package-ecosystem: pip
+  directories:
+  - /apps/wizarr-backend
+  schedule:
+    interval: daily
+    time: 04:00
+    timezone: Europe/Berlin
+  open-pull-requests-limit: 2
+  rebase-strategy: auto
+  commit-message:
+    prefix: '[chore] deps'
+  cooldown:
+    default-days: 1
+    semver-major-days: 7
+    semver-minor-days: 3
+    semver-patch-days: 1
+- package-ecosystem: uv
+  directories:
+  - /
+  schedule:
+    interval: daily
+    time: 04:00
+    timezone: Europe/Berlin
+  open-pull-requests-limit: 2
+  rebase-strategy: auto
+  commit-message:
+    prefix: '[chore] deps'
+  cooldown:
+    default-days: 1
+    semver-major-days: 7
+    semver-minor-days: 3
+    semver-patch-days: 1
+- package-ecosystem: docker
+  directories:
+  - /
+  - /dockerfiles/wizarr
+  - /dockerfiles/wizarr-backend
+  - /dockerfiles/wizarr-ci
+  - /dockerfiles/wizarr-frontend
+  schedule:
+    interval: daily
+    time: 04:00
+    timezone: Europe/Berlin
+  open-pull-requests-limit: 2
+  rebase-strategy: auto
+  commit-message:
+    prefix: '[chore] deps'
+  cooldown:
+    default-days: 1
+    semver-major-days: 7
+    semver-minor-days: 3
+    semver-patch-days: 1
+- package-ecosystem: github-actions
+  directories:
+  - /
+  schedule:
+    interval: daily
+    time: 04:00
+    timezone: Europe/Berlin
+  open-pull-requests-limit: 2
+  rebase-strategy: auto
+  commit-message:
+    prefix: '[chore] deps'
+  cooldown:
+    default-days: 1
+    semver-major-days: 7
+    semver-minor-days: 3
+    semver-patch-days: 1
