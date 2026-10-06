@@ -85,6 +85,7 @@ def session(app):
         Invitation,
         Library,
         MediaServer,
+        PasswordResetToken,
         Settings,
         User,
         WebAuthnCredential,
@@ -109,6 +110,7 @@ def session(app):
         # Main tables
         db.session.query(WizardStep).delete()
         db.session.query(Invitation).delete()
+        db.session.query(PasswordResetToken).delete()
         db.session.query(User).delete()
         db.session.query(Identity).delete()
         db.session.query(Connection).delete()
@@ -141,6 +143,7 @@ def session(app):
         # Main tables
         db.session.query(WizardStep).delete()
         db.session.query(Invitation).delete()
+        db.session.query(PasswordResetToken).delete()
         db.session.query(User).delete()
         db.session.query(Identity).delete()
         db.session.query(Connection).delete()
