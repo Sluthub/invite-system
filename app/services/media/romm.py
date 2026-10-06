@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import base64
-import datetime
 import logging
 import re
 from typing import TYPE_CHECKING, Any
@@ -10,6 +9,7 @@ if TYPE_CHECKING:
     from app.services.media.user_details import MediaUserDetails
 
 import requests
+import structlog
 from sqlalchemy import or_
 
 from app.extensions import db
@@ -56,7 +56,7 @@ class RommClient(RestApiMixin):
         kwargs.setdefault("token_key", "api_key")
         super().__init__(*args, **kwargs)
 
-    def _headers(self) -> dict[str, str]:  # type: ignore[override]
+    def _headers(self) -> dict[str, str]:  # type: ignore
         headers: dict[str, str] = {"Accept": "application/json"}
         if self.token:
             headers["Authorization"] = f"Basic {self.token}"
@@ -132,7 +132,7 @@ class RommClient(RestApiMixin):
                 batch: list[dict[str, Any]] = r.json()
                 # Some RomM versions wrap the list in {"items": [...]} – handle both.
                 if isinstance(batch, dict) and "items" in batch:
-                    batch = batch["items"]  # type: ignore[assignment]
+                    batch = batch["items"]  # type: ignore
 
                 if not isinstance(batch, list):
                     logging.warning("ROMM: unexpected /users payload: %s", batch)
@@ -143,11 +143,17 @@ class RommClient(RestApiMixin):
                 if len(batch) < take:
                     break  # reached final page
                 skip += take
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logging.warning("ROMM: failed to list users – %s", exc, exc_info=True)
             return []
 
         remote_by_id = {str(u.get("id") or u["username"]): u for u in remote_users}
+
+        known_users = User.query.filter(
+            User.server_id == getattr(self, "server_id", None)
+        ).all()
+        if self._skip_prune_on_empty_remote(not remote_by_id, known_users):
+            return known_users
 
         # 1) upsert basic user rows so Wizarr UI has something to show
         for romm_id, ru in remote_by_id.items():
@@ -160,7 +166,7 @@ class RommClient(RestApiMixin):
                     username=ru.get("username", "romm-user"),
                     email=ru.get("email", ""),
                     code="romm",  # placeholder – no invite code
-                    password="romm",  # placeholder
+                    password="romm",  # noqa: S106  # Placeholder string, not actual password
                     server_id=getattr(self, "server_id", None),
                 )
                 db.session.add(db_row)
@@ -184,10 +190,18 @@ class RommClient(RestApiMixin):
 
         # Add default policy attributes (RomM doesn't have specific download/live TV policies)
         for user in users:
-            user.allow_downloads = True  # Default to True for gaming apps
+            # Update standardized User model columns
+            user.allow_downloads = True  # Default for gaming apps
             user.allow_live_tv = False  # RomM doesn't have Live TV
-            user.allow_sync = True  # Default to True for gaming apps
+            user.is_admin = False  # Would need API call to determine
 
+        # Single commit for all metadata updates
+        try:
+            db.session.commit()
+        except Exception as e:
+            logging.error("RomM: failed to update user metadata – %s", e)
+            db.session.rollback()
+            return []
         return users
 
     # ------------------------------------------------------------------
@@ -217,7 +231,7 @@ class RommClient(RestApiMixin):
         try:
             r = self.post(f"{self.API_PREFIX}/users", params=payload)
         except requests.HTTPError as exc:
-            r = exc.response  # type: ignore[assignment]
+            r = exc.response  # type: ignore
 
         # If the server expects JSON body instead, fall back once
         if r is not None and r.status_code == 422:
@@ -237,20 +251,56 @@ class RommClient(RestApiMixin):
             try:
                 r = self.post(f"{self.API_PREFIX}/users", json=alt)
             except requests.HTTPError as exc:
-                r = exc.response  # type: ignore[assignment]
+                r = exc.response  # type: ignore
 
         data: dict[str, Any] = {}
         try:
             if r is not None:
                 data = r.json()
-        except Exception:
-            pass
+        except Exception as exc:
+            logging.debug(f"Failed to parse RomM user creation response: {exc}")
 
-        return data.get("id") or data.get("user", {}).get("id")  # type: ignore[return-value]
+        return data.get("id") or data.get("user", {}).get("id")  # type: ignore
 
     def update_user(self, user_id: str, patch: dict[str, Any]):
         """PATCH selected fields on a RomM user object."""
         return self.patch(f"{self.API_PREFIX}/users/{user_id}", json=patch).json()
+
+    def enable_user(self, user_id: str) -> bool:
+        """Enable a user account on RomM.
+
+        Args:
+            user_id: The user's RomM ID
+
+        Returns:
+            bool: True if the user was successfully enabled, False otherwise
+        """
+        try:
+            # RomM uses enabled field to enable/disable users
+            payload = {"enabled": True}
+            response = self.patch(f"/api/users/{user_id}", json=payload)
+            return response.status_code == 200
+        except Exception as e:
+            structlog.get_logger().error(f"Failed to enable RomM user: {e}")
+            return False
+
+    def disable_user(self, user_id: str) -> bool:
+        """Disable a user account on RomM.
+
+        Args:
+            user_id: The user's RomM ID
+
+        Returns:
+            bool: True if the user was successfully disabled, False otherwise
+        """
+        try:
+            # RomM uses enabled field to enable/disable users
+            payload = {"enabled": False}
+            response = self.patch(f"/api/users/{user_id}", json=payload)
+            return response.status_code == 200
+        except Exception as e:
+            structlog.get_logger().error(f"Failed to disable RomM user: {e}")
+            return False
 
     def delete_user(self, user_id: str):
         resp = self.delete(f"{self.API_PREFIX}/users/{user_id}")
@@ -271,42 +321,42 @@ class RommClient(RestApiMixin):
             else None,
         }
 
-    def get_user_details(self, user_id: str) -> MediaUserDetails:
+    def get_user_details(self, user_identifier: str | int) -> MediaUserDetails:
         """Get detailed user information in standardized format."""
-        from app.models import Library
-        from app.services.media.user_details import MediaUserDetails, UserLibraryAccess
+        user_id = str(user_identifier)
+        from app.services.media.utils import (
+            DateHelper,
+            LibraryAccessHelper,
+            StandardizedPermissions,
+            create_standardized_user_details,
+        )
 
         # Get raw user data from RomM API
         r = self.get(f"{self.API_PREFIX}/users/{user_id}")
         raw_user = r.json()
 
-        # Get all available libraries for this server since RomM gives full access
-        libs_q = (
-            Library.query.filter_by(server_id=self.server_id, enabled=True)
-            .order_by(Library.name)
-            .all()
+        # Extract permissions using utility
+        permissions = StandardizedPermissions.for_basic_server(
+            "romm",
+            is_admin=raw_user.get("role") == "ADMIN",
+            allow_downloads=True,  # ROM files can be downloaded
         )
-        library_access = [
-            UserLibraryAccess(
-                library_id=lib.external_id, library_name=lib.name, has_access=True
-            )
-            for lib in libs_q
-        ]
 
-        return MediaUserDetails(
+        # RomM gives full access to all libraries
+        library_access = LibraryAccessHelper.create_full_access()
+
+        # Parse creation date
+        created_at = DateHelper.parse_iso_date(raw_user.get("created_at"))
+
+        return create_standardized_user_details(
             user_id=str(raw_user.get("id", user_id)),
             username=raw_user.get("username", "Unknown"),
             email=raw_user.get("email"),
-            is_admin=raw_user.get("role") == "ADMIN",
-            is_enabled=raw_user.get("enabled", True),
-            created_at=datetime.datetime.fromisoformat(
-                raw_user["created_at"].rstrip("Z")
-            )
-            if raw_user.get("created_at")
-            else None,
-            last_active=None,  # RomM doesn't track last active time
+            permissions=permissions,
             library_access=library_access,
-            raw_policies=raw_user,
+            created_at=created_at,
+            last_active=None,  # RomM doesn't track last active time
+            is_enabled=raw_user.get("enabled", True),
         )
 
     # ------------------------------------------------------------------
@@ -448,7 +498,73 @@ class RommClient(RestApiMixin):
 
             return True, ""
 
-        except Exception:  # noqa: BLE001
+        except Exception:
             logging.error("ROMM join error", exc_info=True)
             db.session.rollback()
             return False, "An unexpected error occurred."
+
+    def get_user_count(self) -> int:
+        """Get lightweight user count from database without triggering sync."""
+        try:
+            from app.models import MediaServer, User
+
+            if hasattr(self, "server_id") and self.server_id:
+                count = User.query.filter_by(server_id=self.server_id).count()
+            else:
+                # Fallback for legacy settings: find MediaServer for this server type
+                servers = MediaServer.query.filter_by(server_type="romm").all()
+                if servers:
+                    server_ids = [s.id for s in servers]
+                    count = User.query.filter(User.server_id.in_(server_ids)).count()
+                else:
+                    # Ultimate fallback: no easy API for user count in RomM
+                    count = 0
+            return count
+        except Exception as e:
+            logging.error(f"Failed to get RomM user count from database: {e}")
+            return 0
+
+    def get_server_info(self) -> dict:
+        """Get lightweight server information without triggering user sync."""
+        try:
+            # RomM doesn't have traditional sessions/transcoding
+            return {
+                "version": "Unknown",  # Would need API call to get version
+                "transcoding_sessions": 0,  # RomM doesn't transcode
+                "active_sessions": 0,  # Would need to implement session tracking
+            }
+        except Exception as e:
+            logging.error(f"Failed to get RomM server info: {e}")
+            return {
+                "version": "Unknown",
+                "transcoding_sessions": 0,
+                "active_sessions": 0,
+            }
+
+    def get_readonly_statistics(self) -> dict:
+        """Get lightweight statistics without triggering user synchronization."""
+        try:
+            user_count = self.get_user_count()
+            server_info = self.get_server_info()
+
+            return {
+                "user_stats": {
+                    "total_users": user_count,
+                    "active_sessions": server_info.get("active_sessions", 0),
+                },
+                "server_stats": {
+                    "version": server_info.get("version", "Unknown"),
+                    "transcoding_sessions": server_info.get("transcoding_sessions", 0),
+                },
+                "library_stats": {},
+                "content_stats": {},
+            }
+        except Exception as e:
+            logging.error(f"Failed to get RomM readonly statistics: {e}")
+            return {
+                "user_stats": {"total_users": 0, "active_sessions": 0},
+                "server_stats": {"version": "Unknown", "transcoding_sessions": 0},
+                "library_stats": {},
+                "content_stats": {},
+                "error": str(e),
+            }

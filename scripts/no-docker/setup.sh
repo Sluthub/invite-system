@@ -1,19 +1,7 @@
-#!/bin/bash
-echo "Don't run this right away! This is a template to understand how to set it up."
-exit
-
-# Clone the repo and cd to it
-sudo apt install python3 python3-venv npm nginx
-python3 -m venv venv
-source venv/bin/activate
-pip3 install poetry
-npm install
-sudo cp files/nginx-main.conf /etc/nginx/conf.d/wizarr.conf
-# Edit /etc/nginx/conf.d/wizarr.conf to have "root /path/to/wizarr/dist/apps/wizarr-frontend;"
-sudo cp scripts/no-docker/wizarr.service /etc/systemd/system/wizarr.service
-# Edit /etc/systemd/system/wizarr.service to have "ExecStart=/path/to/wizarr/scripts/no-docker/start.sh"
-sudo systemctl daemon-reload
-sudo systemctl enable --now nginx
-sudo systemctl reload nginx
-sudo systemctl enable --now wizarr
-# Connect on port 5690 of your IP. Either use cloudflare tunnels or reconfigure nginx to port 443/80 to avoid that
+#!/bin/sh
+set -eu
+cd "$(dirname "$0")/../.."
+command -v uv >/dev/null
+command -v node >/dev/null
+command -v npm >/dev/null
+uv sync --locked --no-dev

@@ -1,9 +1,19 @@
 import datetime
 import logging
+import math
 import os
+from collections import defaultdict
 from urllib.parse import urlparse
 
-from flask import Blueprint, Response, redirect, render_template, request, url_for
+from flask import (
+    Blueprint,
+    Response,
+    jsonify,
+    redirect,
+    render_template,
+    request,
+    url_for,
+)
 from flask_babel import _
 from flask_login import login_required
 
@@ -11,11 +21,14 @@ from app.extensions import db, limiter
 from app.models import (
     Identity,
     Invitation,
+    LDAPConfiguration,
     Library,
     MediaServer,
+    PasswordResetToken,
     Settings,
     User,
     invitation_servers,
+    invitation_users,
 )
 from app.services.expiry import get_expired_users, get_expiring_this_week_users
 from app.services.invites import create_invite
@@ -26,8 +39,13 @@ from app.services.media.service import (
     list_users_all_servers,
     list_users_for_server,
     scan_libraries_for_server,
+    upsert_scanned_libraries,
 )
-from app.services.update_check import check_update_available, get_sponsors
+from app.services.update_check import (
+    check_update_available,
+    get_manifest_last_fetch,
+    get_sponsors,
+)
 
 admin_bp = Blueprint("admin", __name__)
 
@@ -38,12 +56,14 @@ def dashboard():
     __version__ = os.getenv("APP_VERSION", "dev")
     update_available = check_update_available(__version__)
     sponsors = get_sponsors()
+    manifest_last_fetch = get_manifest_last_fetch()
 
     return render_template(
         "admin.html",
         update_available=update_available,
         sponsors=sponsors,
         version=__version__,
+        manifest_last_fetch=manifest_last_fetch,
     )
 
 
@@ -63,7 +83,32 @@ def home():
 @login_required
 def now_playing_cards():
     try:
+        from app.services.image_proxy import ImageProxyService
+
         sessions = get_now_playing_all_servers()
+
+        # Generate image proxy tokens for all URLs
+        for session in sessions:
+            server_id = session.get("server_id")
+
+            # Generate token for artwork_url
+            if session.get("artwork_url"):
+                session["artwork_token"] = ImageProxyService.generate_token(
+                    session["artwork_url"], server_id
+                )
+
+            # Generate token for thumbnail_url
+            if session.get("thumbnail_url"):
+                session["thumbnail_token"] = ImageProxyService.generate_token(
+                    session["thumbnail_url"], server_id
+                )
+
+            # Generate token for fallback_artwork_url
+            if session.get("fallback_artwork_url"):
+                session["fallback_artwork_token"] = ImageProxyService.generate_token(
+                    session["fallback_artwork_url"], server_id
+                )
+
         return render_template("admin/now_playing_cards.html", sessions=sessions)
     except Exception as e:
         logging.error(f"Failed to get now playing data: {e}")
@@ -98,7 +143,7 @@ def invite():
     target_server = None
     for sid in chosen_ids:
         if sid:
-            target_server = MediaServer.query.get(int(sid))
+            target_server = db.session.get(MediaServer, int(sid))
             break
     if not target_server:
         target_server = first_server
@@ -106,6 +151,10 @@ def invite():
     server_type = target_server.server_type if target_server else None
     allow_downloads = bool(getattr(target_server, "allow_downloads", False))
     allow_live_tv = bool(getattr(target_server, "allow_live_tv", False))
+
+    # Check LDAP configuration
+    ldap_config = LDAPConfiguration.query.first()
+    ldap_enabled = ldap_config and ldap_config.enabled
 
     if request.method == "POST":
         from app.models import WizardBundle
@@ -126,6 +175,7 @@ def invite():
                 servers=servers,
                 chosen_server_id=target_server.id if target_server else None,
                 bundles=bundles,
+                ldap_enabled=ldap_enabled,
             ), 400
 
         current_url = request.headers.get("HX-Current-URL")
@@ -144,6 +194,7 @@ def invite():
             servers=servers,
             chosen_server_id=target_server.id if target_server else None,
             bundles=bundles,
+            ldap_enabled=ldap_enabled,
         )
 
     # GET → initial render
@@ -158,6 +209,7 @@ def invite():
         servers=servers,
         chosen_server_id=target_server.id if target_server else None,
         bundles=bundles,
+        ldap_enabled=ldap_enabled,
     )
 
 
@@ -179,7 +231,7 @@ def invite_table():
 
     Accepts:
       - server filter via POST form data (preferred) or querystring (?server=ID)
-      - delete action via querystring (?delete=CODE)
+      - delete action via querystring (?delete_id=ID)
 
     Returns the 'tables/invite_card.html' partial.
     """
@@ -188,13 +240,30 @@ def invite_table():
     # ------------------------------------------------------------------
     server_filter = request.form.get("server") or request.args.get("server")
 
-    if code := request.args.get("delete"):
-        # Find the invitation to delete
-        invitation = Invitation.query.filter_by(code=code).first()
-        if invitation:
-            # Delete the invitation - CASCADE will handle association table cleanup
-            db.session.delete(invitation)
-            db.session.commit()
+    if raw_delete_id := request.args.get("delete_id"):
+        # Delete by primary key. Deleting by code broke when a code contained a
+        # trailing space: the browser strips it from the query string, so the
+        # exact-match lookup never matched and the invitation became undeletable.
+        #
+        # Use an explicit ?delete_id= parameter rather than reusing the old
+        # ?delete= (which carried an invite *code*): a stale numeric code from a
+        # cached page could otherwise be read as an unrelated invitation *id* and
+        # delete the wrong row. Old cached ?delete= requests now simply no-op.
+        #
+        # Parse defensively — str.isdigit() accepts values int() rejects (e.g.
+        # "²") and over-long digit strings hit Python's int-conversion limit,
+        # so an unguarded int() would raise and 500. Treat anything unparseable as
+        # a no-op.
+        try:
+            delete_pk = int(raw_delete_id)
+        except (TypeError, ValueError):
+            delete_pk = None
+        if delete_pk is not None:
+            invitation = db.session.get(Invitation, delete_pk)
+            if invitation:
+                # CASCADE handles association-table cleanup
+                db.session.delete(invitation)
+                db.session.commit()
 
     # ------------------------------------------------------------------
     # 2. Base query (libraries + servers)
@@ -214,16 +283,24 @@ def invite_table():
         except ValueError:
             server_id = None
         if server_id:
-            # join to association (assuming relationship Invitation.servers)
-            query = Invitation.query.options(
-                db.joinedload(Invitation.libraries).joinedload(Library.server),
-                db.joinedload(Invitation.servers),
-                db.joinedload(
-                    Invitation.users
-                ),  # NEW: Load all users who used this invitation
-            ).order_by(Invitation.created.desc())
+            # Restrict to invitations linked to the selected server. Multi-server
+            # invites match through the association table (Invitation.servers).
+            # Legacy single-server invites have no association rows and carry the
+            # server on Invitation.server_id; the rest of the app treats those as
+            # `servers or [server]`, so include them here too — but only when they
+            # have no association rows, so a stale legacy server_id can't broaden a
+            # genuine multi-server invite.
+            query = query.filter(
+                db.or_(
+                    Invitation.servers.any(MediaServer.id == server_id),
+                    db.and_(
+                        ~Invitation.servers.any(),
+                        Invitation.server_id == server_id,
+                    ),
+                )
+            )
 
-            srv = MediaServer.query.get(server_id)
+            srv = db.session.get(MediaServer, server_id)
             server_type = srv.server_type if srv else None
         else:
             server_type = None
@@ -246,10 +323,9 @@ def invite_table():
     # ------------------------------------------------------------------
     # 4. Time context (timezone aware strongly recommended)
     # ------------------------------------------------------------------
-    # If you want local Europe/Paris time, set tzinfo; falling back to naive now.
-    # from zoneinfo import ZoneInfo
-    # now = datetime.datetime.now(tz=ZoneInfo("Europe/Paris"))
-    now = datetime.datetime.now()
+    # Note: Currently using naive datetime. For timezone-aware implementation,
+    # consider using zoneinfo.ZoneInfo with appropriate timezone.
+    now = datetime.datetime.now(datetime.UTC)
 
     # ------------------------------------------------------------------
     # 5. Annotate invitations for the template (view-model enrichment)
@@ -262,14 +338,22 @@ def invite_table():
                 expires_str = inv.expires  # Store as string for type safety
                 for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%dT%H:%M:%S"):
                     try:
-                        inv.expires = datetime.datetime.strptime(expires_str, fmt)
+                        inv.expires = datetime.datetime.strptime(
+                            expires_str, fmt
+                        ).replace(tzinfo=datetime.UTC)
                         break
                     except ValueError:
                         continue
             # ensure we have a datetime before comparing
             if isinstance(inv.expires, datetime.datetime):
-                inv.expired = inv.expires < now
-                inv.rel_expiry = _rel_string(inv.expires, now)  # NEW
+                # Ensure timezone-aware comparison
+                expires_aware = (
+                    inv.expires
+                    if inv.expires.tzinfo
+                    else inv.expires.replace(tzinfo=datetime.UTC)
+                )
+                inv.expired = expires_aware < now
+                inv.rel_expiry = _rel_string(expires_aware, now)  # NEW
             else:
                 inv.expired = False
                 inv.rel_expiry = _("Unknown")
@@ -277,17 +361,18 @@ def invite_table():
             inv.expired = False
             inv.rel_expiry = _("Never")
 
-        # ---- group libraries by server ----
-        server_libs: dict[str, list[str]] = {}
+        # ---- group libraries by server ID (not name, to handle unique lookups) ----
+        server_libs: dict[int, list[str]] = {}
         for lib in inv.libraries:
             if not lib.server:  # orphan guard
                 continue
-            server_libs.setdefault(lib.server.name, []).append(lib.name)
+            server_libs.setdefault(lib.server.id, []).append(lib.name)
         # Sort names inside each group
         for lst in server_libs.values():
             lst.sort()
 
-        inv.display_libraries_by_server = server_libs
+        # Store library mapping on invitation (not on shared server objects!)
+        inv.server_library_map = server_libs
         inv.display_libraries = sorted(
             {lib.name for lib in inv.libraries if lib.server}
         )
@@ -304,10 +389,11 @@ def invite_table():
             else:
                 all_used = False
 
-            # library list for this server (by *server name* key)
-            libs = server_libs.get(srv.name, [])
-            srv.library_names = libs  # Use a non-conflicting attribute name
-            # If libs is empty (default libraries), count all enabled libraries on this server
+            # Don't modify the shared server object - store on invitation instead
+            # The template will use inv.server_library_map[srv.id]
+            libs = server_libs.get(srv.id, [])
+
+            # Count libraries for display
             if libs:
                 srv.library_count = len(libs)
             else:
@@ -362,6 +448,14 @@ def _rel_string(target: datetime.datetime, now: datetime.datetime) -> str:
     if mins >= 1:
         return _("in %(n)d m", n=mins)  # in 45 m
     return _("soon")
+
+
+@admin_bp.get("/invite/<int:invite_id>/delete-modal")
+@login_required
+def delete_invite_modal(invite_id: int):
+    """Show the delete invitation confirmation modal."""
+    invitation = db.get_or_404(Invitation, invite_id)
+    return render_template("_partials/delete_invite_modal.html", invitation=invitation)
 
 
 # Users
@@ -433,31 +527,39 @@ def user_detail(db_id: int):
     • GET  → return the enhanced per-server expiry edit modal
     • POST → update per-server expiry then return the entire card grid
     """
-    from app.models import Invitation
-    from app.services.expiry import set_server_specific_expiry
 
-    user = User.query.get_or_404(db_id)
+    user = db.get_or_404(User, db_id)
 
     if request.method == "POST":
         # Handle per-server expiry updates
+        # Only update fields that are actually present in the form to avoid
+        # clearing fields that weren't submitted
 
-        # Find the invitation this user was created from
-        invitation = None
-        if user.code:
-            invitation = Invitation.query.filter_by(code=user.code).first()
+        # Update expiry only if present in form
+        if "expires" in request.form:
+            raw_expires = request.form.get("expires")
+            if raw_expires:
+                user_expires = datetime.datetime.fromisoformat(raw_expires)
+                # Ensure timezone-aware datetime
+                user.expires = (
+                    user_expires
+                    if user_expires.tzinfo
+                    else user_expires.replace(tzinfo=datetime.UTC)
+                )
+            else:
+                user.expires = None
 
-        # Update expiry for the user's specific server
-        raw_expires = request.form.get("expires")
-        user.expires = (
-            datetime.datetime.fromisoformat(raw_expires) if raw_expires else None
-        )
+        # Update notes only if present in form
+        if "notes" in request.form:
+            user.notes = request.form.get("notes", "")
 
-        # If we have an invitation and server, also update the server-specific expiry
-        if invitation and user.server_id:
-            server_expires = (
-                datetime.datetime.fromisoformat(raw_expires) if raw_expires else None
-            )
-            set_server_specific_expiry(invitation.id, user.server_id, server_expires)
+        # NOTE: We intentionally do NOT update server-specific expiry here.
+        # Server-specific expiry in invitation_servers is meant for multi-server invitations
+        # where the same user has different expiry dates on different servers.
+        # When editing a user's expiry from the UI, we only want to affect this specific
+        # user, not future users who might be created from the same invitation code.
+        # The server-specific expiry should only be set during invitation creation,
+        # not during individual user editing.
 
         db.session.commit()
 
@@ -476,17 +578,211 @@ def user_detail(db_id: int):
         # Single user, no identity linking
         related_users = [user]
 
-    # Get the invitation to show additional context
-    invitation = None
-    if user.code:
-        invitation = Invitation.query.filter_by(code=user.code).first()
+    # Pre-load libraries for each user to avoid client-side fetching
+    user_libraries_map = {}
+    for related_user in related_users:
+        if related_user.server:
+            libraries = (
+                Library.query.filter_by(server_id=related_user.server.id, enabled=True)
+                .order_by(Library.name)
+                .all()
+            )
+            accessible_libraries = related_user.get_accessible_libraries()
+            user_libraries_map[related_user.id] = {
+                "libraries": libraries,
+                "accessible_libraries": accessible_libraries or [],
+            }
+        else:
+            user_libraries_map[related_user.id] = {
+                "libraries": [],
+                "accessible_libraries": [],
+            }
 
     return render_template(
         "admin/user_modal.html",
         user=user,
         related_users=related_users,
-        invitation=invitation,
+        user_libraries_map=user_libraries_map,
     )
+
+
+@admin_bp.route("/user/<int:db_id>/libraries", methods=["GET"])
+@login_required
+def user_libraries(db_id: int):
+    """Return available libraries for the user's server as JSON."""
+    user = db.get_or_404(User, db_id)
+
+    if not user.server:
+        return jsonify({"libraries": [], "accessible_libraries": []}), 200
+
+    try:
+        # Get all enabled libraries for this server
+        libraries = (
+            Library.query.filter_by(server_id=user.server.id, enabled=True)
+            .order_by(Library.name)
+            .all()
+        )
+
+        # Get user's current accessible libraries
+        # If accessible_libraries column is NULL, user has access to all libraries
+        accessible_libraries = user.get_accessible_libraries()
+
+        # Return empty list if None (meaning all libraries accessible)
+        if accessible_libraries is None:
+            accessible_libraries = []
+
+        logging.info(
+            f"Loading libraries for user {user.username} (ID: {db_id}): "
+            f"{len(libraries)} total libraries, "
+            f"accessible: {accessible_libraries or 'all'}"
+        )
+
+        return jsonify(
+            {
+                "libraries": [{"id": lib.id, "name": lib.name} for lib in libraries],
+                "accessible_libraries": accessible_libraries,
+            }
+        ), 200
+    except Exception as exc:
+        logging.error(f"Failed to load libraries for user {db_id}: {exc}")
+        return jsonify({"error": str(exc)}), 500
+
+
+@admin_bp.route("/user/<int:db_id>/permissions", methods=["POST"])
+@login_required
+def update_user_permissions(db_id: int):
+    """Update user permissions (downloads, live_tv, camera_upload)."""
+    from app.services.media.service import get_client_for_media_server
+
+    user = db.get_or_404(User, db_id)
+
+    if not user.server:
+        return Response("User has no associated server", status=400)
+
+    # Get permission type and value from form
+    permission_type = request.form.get("permission_type")
+    enabled = request.form.get("enabled") == "true"
+
+    if permission_type not in (
+        "allow_downloads",
+        "allow_live_tv",
+        "allow_camera_upload",
+    ):
+        return Response("Invalid permission type", status=400)
+
+    try:
+        # Update database
+        setattr(user, permission_type, enabled)
+        db.session.commit()
+
+        # Update media server via API (with graceful error handling)
+        try:
+            client = get_client_for_media_server(user.server)  # type: ignore
+
+            # Use the generic interface - all clients support this now
+            user_identifier = (
+                user.email if user.server.server_type == "plex" else user.token
+            )
+            permissions = {
+                "allow_downloads": user.allow_downloads or False,
+                "allow_live_tv": user.allow_live_tv or False,
+                "allow_camera_upload": user.allow_camera_upload or False,
+            }
+
+            success = client.update_user_permissions(user_identifier, permissions)
+            if not success:
+                logging.warning(
+                    f"Media server {user.server.server_type} does not support permission updates or update failed"
+                )
+        except Exception as api_exc:
+            # Log but don't fail - database update is more important
+            logging.warning(
+                f"Could not update permissions on media server for user {user.username}: {api_exc}"
+            )
+
+        logging.info(
+            f"Updated {permission_type} to {enabled} for user {user.username} (ID: {db_id})"
+        )
+
+        response = Response("", status=200)
+        response.headers["HX-Trigger"] = "refreshUserTable"
+        return response
+
+    except Exception as exc:
+        logging.error(f"Failed to update user permissions: {exc}")
+        db.session.rollback()
+        return Response(f"Failed to update permissions: {exc!s}", status=500)
+
+
+@admin_bp.route("/user/<int:db_id>/libraries", methods=["POST"])
+@login_required
+def update_user_libraries(db_id: int):
+    """Update user's accessible libraries."""
+    from app.services.media.service import get_client_for_media_server
+
+    user = db.get_or_404(User, db_id)
+
+    if not user.server:
+        return Response("User has no associated server", status=400)
+
+    try:
+        # Get selected library IDs from form
+        library_ids = request.form.getlist("library_ids[]")
+        logging.info(f"Received library_ids from form: {library_ids}")
+
+        # Convert string IDs to integers
+        try:
+            library_ids = [int(lid) for lid in library_ids if lid]
+        except (ValueError, TypeError):
+            library_ids = []
+
+        logging.info(f"Converted to integers: {library_ids}")
+
+        # If no libraries selected, it means "all libraries" (None)
+        if not library_ids:
+            user.set_accessible_libraries(None)
+            library_names = None
+        else:
+            # Convert IDs to library names
+            libraries = Library.query.filter(Library.id.in_(library_ids)).all()
+            library_names = [lib.name for lib in libraries]
+            logging.info(f"Converted to library names: {library_names}")
+            user.set_accessible_libraries(library_names)
+
+        db.session.commit()
+
+        # Update media server via API (with graceful error handling)
+        try:
+            client = get_client_for_media_server(user.server)  # type: ignore
+
+            # Use the generic interface - all clients support this now
+            user_identifier = (
+                user.email if user.server.server_type == "plex" else user.token
+            )
+
+            success = client.update_user_libraries(user_identifier, library_names)
+            if not success:
+                logging.warning(
+                    f"Media server {user.server.server_type} does not support library updates or update failed"
+                )
+        except Exception as api_exc:
+            # Log but don't fail - database update is more important
+            logging.warning(
+                f"Could not update library access on media server for user {user.username}: {api_exc}"
+            )
+
+        logging.info(
+            f"Updated library access for user {user.username} (ID: {db_id}): {library_names or 'all libraries'}"
+        )
+
+        response = Response("", status=200)
+        response.headers["HX-Trigger"] = "refreshUserTable"
+        return response
+
+    except Exception as exc:
+        logging.error(f"Failed to update library access: {exc}")
+        db.session.rollback()
+        return Response(f"Failed to update library access: {exc!s}", status=500)
 
 
 @admin_bp.post("/invite/scan-libraries")
@@ -512,22 +808,16 @@ def invite_scan_libraries():
 
     for server in servers:
         try:
-            raw = scan_libraries_for_server(server)
-            items = raw.items() if isinstance(raw, dict) else [(n, n) for n in raw]
+            raw, authoritative = scan_libraries_for_server(server)
         except Exception as exc:
             logging.warning("Library scan failed for %s: %s", server.name, exc)
-            items = []
+            raw, authoritative = [], False
 
-        for fid, name in items:
-            lib = Library.query.filter_by(external_id=fid, server_id=server.id).first()
-            if lib:
-                lib.name = name
-            else:
-                lib = Library()
-                lib.external_id = fid
-                lib.name = name
-                lib.server_id = server.id
-                db.session.add(lib)
+        # Upsert scanned libraries, preserving each row's enabled flag (the admin's
+        # saved default, rendered by the checkbox partial) and invite associations.
+        upsert_scanned_libraries(server, raw, authoritative=authoritative)
+
+        # Flush so the temporary changes are visible for listing
         db.session.flush()
         server_libs[server.id] = (
             Library.query.filter_by(server_id=server.id).order_by(Library.name).all()
@@ -601,7 +891,7 @@ def unlink_account():
     from app.models import Identity  # local import to avoid circular refs
 
     for iid in identities_to_check:
-        identity = Identity.query.get(iid)
+        identity = db.session.get(Identity, iid)
         if identity and not identity.accounts:
             db.session.delete(identity)
     db.session.commit()
@@ -623,6 +913,163 @@ def bulk_delete_users():
     response = Response("")
     response.headers["HX-Trigger"] = "refreshUserTable"
     return response
+
+
+@admin_bp.post("/users/<int:user_id>/remove-from-server/<int:server_id>")
+@login_required
+def remove_user_from_server_endpoint(user_id: int, server_id: int):
+    """Remove a user from a specific server while preserving other server accounts."""
+    from app.services.media.service import remove_user_from_server
+
+    success = remove_user_from_server(user_id, server_id)
+
+    if success:
+        # Trigger user table refresh to show updated server badges
+        response = Response("")
+        response.headers["HX-Trigger"] = "refreshUserTable"
+        return response
+    # Return error response
+    return Response("User or server not found", status=404)
+
+
+@admin_bp.get("/users/<int:user_id>/delete-modal")
+@login_required
+def delete_user_modal(user_id: int):
+    """Show the delete user confirmation modal."""
+    # Find the user and all their accounts (if grouped by identity)
+    user = db.get_or_404(User, user_id)
+
+    # Get all accounts for this user (via identity or just the user itself)
+    if user.identity_id:
+        # User is part of an identity - get all accounts for this identity
+        accounts = User.query.filter_by(identity_id=user.identity_id).all()
+        display_name = user.identity.primary_username or user.username
+        user_email = user.identity.primary_email or user.email
+    else:
+        # Standalone user
+        accounts = [user]
+        display_name = user.username
+        user_email = user.email
+
+    return render_template(
+        "_partials/delete_user_modal.html",
+        accounts=accounts,
+        display_name=display_name,
+        user_email=user_email,
+    )
+
+
+@admin_bp.post("/users/process-deletion")
+@login_required
+def process_user_deletion():
+    """Process the user deletion based on selected server accounts."""
+    selected_accounts = request.form.getlist("server_accounts")
+
+    if not selected_accounts:
+        return Response("No accounts selected", status=400)
+
+    # Remove users from their respective servers
+    for account_id in selected_accounts:
+        delete_user(int(account_id))
+
+    # Trigger user table refresh
+    response = Response("")
+    response.headers["HX-Trigger"] = "refreshUserTable,closeModal"
+    return response
+
+
+@admin_bp.get("/users/<int:user_id>/reset-password-modal")
+@login_required
+def reset_password_modal(user_id: int):
+    """Show the password reset link modal with option to generate or view existing token."""
+    from datetime import UTC, datetime
+
+    user = db.get_or_404(User, user_id)
+
+    # Check for existing valid (unused and not expired) tokens
+    existing_token = (
+        PasswordResetToken.query.filter_by(user_id=user.id, used=False)
+        .filter(PasswordResetToken.expires_at > datetime.now(UTC))
+        .order_by(PasswordResetToken.created_at.desc())
+        .first()
+    )
+
+    # Validate the token is still valid
+    if existing_token and existing_token.is_valid():
+        # Token exists and is valid - show it
+        reset_path = f"/reset/{existing_token.code}"
+        reset_url = request.url_root.rstrip("/") + reset_path
+        expires_at = existing_token.expires_at.strftime("%Y-%m-%d %H:%M UTC")
+
+        return render_template(
+            "modals/password-reset-link.html",
+            username=user.username,
+            reset_url=reset_url,
+            code=existing_token.code,
+            expires_at=expires_at,
+            has_token=True,
+        )
+    # No valid token - show generate button
+    return render_template(
+        "modals/password-reset-link.html",
+        username=user.username,
+        user_id=user.id,
+        has_token=False,
+    )
+
+
+@admin_bp.post("/users/<int:user_id>/generate-reset-link")
+@login_required
+def generate_reset_link(user_id: int):
+    """Generate a new password reset token and return the updated modal."""
+    import traceback
+
+    from app.services.password_reset import create_reset_token
+
+    user = db.get_or_404(User, user_id)
+
+    try:
+        token = create_reset_token(user.id)
+        if not token:
+            return render_template(
+                "modals/password-reset-link.html",
+                error="Failed to create password reset token",
+                username=user.username,
+                user_id=user.id,
+                has_token=False,
+            ), 500
+
+        # Generate the full reset URL
+        reset_path = f"/reset/{token.code}"
+        reset_url = request.url_root.rstrip("/") + reset_path
+
+        # Format expiry time
+        expires_at = token.expires_at.strftime("%Y-%m-%d %H:%M UTC")
+
+        return render_template(
+            "modals/password-reset-link.html",
+            username=user.username,
+            reset_url=reset_url,
+            code=token.code,
+            expires_at=expires_at,
+            has_token=True,
+        )
+
+    except Exception as e:
+        logging.error("Error creating reset token for user %s: %s", user_id, str(e))
+        logging.error(
+            "Traceback for user %s (username: %s):\n%s",
+            user_id,
+            user.username,
+            traceback.format_exc(),
+        )
+        return render_template(
+            "modals/password-reset-link.html",
+            error="Internal server error",
+            username=user.username,
+            user_id=user.id,
+            has_token=False,
+        ), 500
 
 
 # Helper: group and enrich users for display
@@ -651,7 +1098,7 @@ def _group_users_for_display(user_list):
 
     cards = []
     for lst in groups.values():
-        primary = min(lst, key=lambda x: (x.username or ""))
+        primary = min(lst, key=lambda x: x.username or "")
         photo = next((a.photo for a in lst if a.photo), None)
         expire_dates = [a.expires for a in lst if a.expires]
         expires = min(expire_dates) if expire_dates else None
@@ -659,6 +1106,9 @@ def _group_users_for_display(user_list):
             (a.code for a in lst if a.code and a.code not in ("None", "empty")), ""
         )
         allow_sync = any(getattr(a, "allowSync", False) for a in lst)
+
+        # Note: allow_downloads and allow_live_tv are now properties that read from metadata
+        # No need to query database directly - the properties handle this automatically
 
         # Get the invitation date from the earliest invite code
         invited_dates = []
@@ -671,10 +1121,11 @@ def _group_users_for_display(user_list):
 
         primary.accounts = lst
         primary.photo = photo or primary.photo
-        primary.expires = expires
+        primary.earliest_expires = expires
         primary.code = code
         primary.allowSync = allow_sync
         primary.invited_date = invited_date
+        # Note: allow_downloads and allow_live_tv are properties - no need to set them
         cards.append(primary)
     return cards
 
@@ -706,7 +1157,7 @@ def edit_identity(identity_id):
     """Create / update a nickname for an Identity row via HTMX modal."""
     from app.models import Identity
 
-    identity = Identity.query.get_or_404(identity_id)
+    identity = db.get_or_404(Identity, identity_id)
 
     if request.method == "POST":
         nickname = request.form.get("nickname", "").strip() or None
@@ -726,16 +1177,13 @@ def edit_identity(identity_id):
 @admin_bp.route("/accepted-invites-card")
 @login_required
 def accepted_invites_card():
-    """Return a small card with the most recent accepted invitations.
+    """Return a paginated card with the most recent accepted invitations."""
 
-    The card is rendered as a standalone fragment suitable for embedding via
-    HTMX. We fetch the *n* most recent invitations that have been used (either
-    the legacy ``Invitation.used`` flag or per-server usage via the
-    ``invitation_servers`` association table).
-    """
+    page = request.args.get("page", default=1, type=int) or 1
+    page = max(page, 1)
 
-    # Number of entries to display – allow up to 13 before scrolling
-    LIMIT = 13
+    server_count = MediaServer.query.count()
+    per_page = max(server_count * 3, 3)
 
     # --- build a sub-query that also covers multi-server invites -------------
     # For invites that target multiple servers, the ``Invitation.used`` flag
@@ -754,25 +1202,66 @@ def accepted_invites_card():
         invitation_servers.c.used.is_(True)
     )
 
-    query = (
-        Invitation.query
-        # eager-load the user + primary server to avoid N+1 lookup
-        .options(
-            db.joinedload(Invitation.used_by),  # Keep for backward compatibility
-            db.joinedload(
-                Invitation.users
-            ),  # NEW: Load all users who used this invitation
-            db.joinedload(Invitation.server),
-            db.joinedload(Invitation.servers),
+    # Query user-invitation pairs with proper timestamp ordering
+    # This ensures pagination counts actual displayed entries, not just invitations
+    # Use the invitation_users.used_at timestamp (individual user's acceptance time)
+    # instead of Invitation.used_at (first acceptance time) to properly handle
+    # unlimited invitations where multiple users can use the same invite code
+
+    user_invite_pairs = (
+        db.session.query(
+            User.id,
+            invitation_users.c.used_at.label("joined_at"),
         )
+        .join(invitation_users, User.id == invitation_users.c.user_id)
+        .join(Invitation, Invitation.id == invitation_users.c.invite_id)
         .filter(or_(Invitation.used.is_(True), Invitation.id.in_(used_invite_ids)))
-        .order_by(Invitation.used_at.desc().nullslast(), Invitation.created.desc())
-        .limit(LIMIT)
+        .order_by(invitation_users.c.used_at.desc(), User.id.desc())
+        .all()
     )
 
-    invites = query.all()
+    total = len(user_invite_pairs)
 
-    return render_template("admin/accepted_invites_card.html", invites=invites)
+    if total == 0:
+        page = 1
+        total_pages = 1
+        offset = 0
+        recent_users = []
+    else:
+        total_pages = max(math.ceil(total / per_page), 1)
+        page = min(page, total_pages)
+        offset = (page - 1) * per_page
+        paginated_pairs = user_invite_pairs[offset : offset + per_page]
+
+        # Load full User objects for the paginated results
+        user_ids = [pair.id for pair in paginated_pairs]
+        recent_users = (
+            User.query.filter(User.id.in_(user_ids))
+            .options(db.joinedload(User.server))
+            .all()
+        )
+
+        # Create a dict to attach timestamps and sort users to match the pagination order
+        timestamps = {pair.id: pair.joined_at for pair in paginated_pairs}
+        user_order = {pair.id: idx for idx, pair in enumerate(paginated_pairs)}
+        recent_users.sort(key=lambda u: user_order.get(u.id, 999))
+        for user in recent_users:
+            user.joined_at = timestamps.get(user.id)
+
+    start_index = offset + 1 if total else 0
+    end_index = offset + len(recent_users)
+
+    return render_template(
+        "admin/accepted_invites_card.html",
+        recent_users=recent_users,
+        page=page,
+        per_page=per_page,
+        total=total,
+        total_pages=total_pages,
+        start_index=start_index,
+        end_index=end_index,
+        server_count=server_count,
+    )
 
 
 # HTMX endpoint for server health card
@@ -789,13 +1278,28 @@ def server_health_card():
         base_url = f"http://127.0.0.1:{server_port}"
 
         response = requests.get(
-            f"{base_url}/settings/servers/statistics/all",
+            f"{base_url}/settings/servers/health/all",
             cookies=request.cookies,
             timeout=10,
         )
 
         if response.status_code == 200:
             all_stats = response.json()
+            sessions = get_now_playing_all_servers()
+
+            active_counts = defaultdict(int)
+            transcoding_counts = defaultdict(int)
+            for session in sessions:
+                server_key = session.get("server_id")
+                if server_key is None:
+                    continue
+                key = str(server_key)
+                active_counts[key] += 1
+                transcoding_info = session.get("transcoding_info") or {}
+                if isinstance(transcoding_info, dict) and transcoding_info.get(
+                    "is_transcoding"
+                ):
+                    transcoding_counts[key] += 1
 
             server_health = []
 
@@ -811,6 +1315,7 @@ def server_health_card():
                 user_stats = stats.get("user_stats", {}) or {}
 
                 is_online = ("error" not in stats) and bool(server_stats)
+                server_key = str(server_id)
 
                 server_info = {
                     "id": server_id,
@@ -821,11 +1326,18 @@ def server_health_card():
                 }
 
                 if is_online:
+                    active_sessions = active_counts.get(
+                        server_key, user_stats.get("active_sessions", 0)
+                    )
+                    transcoding_sessions = transcoding_counts.get(
+                        server_key, server_stats.get("transcoding_sessions", 0)
+                    )
+
                     server_info.update(
                         {
                             "version": server_stats.get("version", "Unknown"),
-                            "active_sessions": user_stats.get("active_sessions", 0),
-                            "transcoding": server_stats.get("transcoding_sessions", 0),
+                            "active_sessions": active_sessions,
+                            "transcoding": transcoding_sessions,
                             "total_users": user_stats.get("total_users", 0),
                         }
                     )
@@ -846,7 +1358,7 @@ def server_health_card():
 
     except Exception as e:
         return render_template(
-            "admin/server_health_card.html", success=False, error=f"Error: {str(e)}"
+            "admin/server_health_card.html", success=False, error=f"Error: {e!s}"
         )
 
 
@@ -890,7 +1402,7 @@ def sync_users():
         server_id = request.args.get("server")
 
         if server_id:
-            srv = MediaServer.query.get(int(server_id))
+            srv = db.session.get(MediaServer, int(server_id))
             if srv:
                 list_users_for_server(srv)
         else:
@@ -907,3 +1419,9 @@ def sync_users():
             500,
             {"Content-Type": "application/json"},
         )
+
+
+@admin_bp.route("/activity")
+@login_required
+def activity():
+    return redirect(url_for("activity.activity_dashboard"))

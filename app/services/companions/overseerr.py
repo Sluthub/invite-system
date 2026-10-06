@@ -19,16 +19,20 @@ class OverseerrClient(CompanionClient):
         return "Overseerr/Jellyseerr"
 
     def invite_user(
-        self, username: str, email: str, connection: Connection, password: str = ""
+        self,
+        username: str,  # noqa: ARG002
+        email: str,  # noqa: ARG002
+        connection: Connection,  # noqa: ARG002
+        password: str = "",  # noqa: ARG002
     ) -> dict[str, str]:
         """
         Overseerr connections are info-only, no actual API calls needed.
 
         Args:
-            username: Username to invite
-            email: Email address
-            connection: Connection object with URL and API key
-            password: Password for the user (optional, defaults to empty string)
+            username: Username to invite (unused - info-only)
+            email: Email address (unused - info-only)
+            connection: Connection object with URL and API key (unused - info-only)
+            password: Password for the user (unused - info-only)
 
         Returns:
             Dict with 'status' and 'message' keys
@@ -38,13 +42,13 @@ class OverseerrClient(CompanionClient):
             "message": "Overseerr auto-imports users automatically",
         }
 
-    def delete_user(self, username: str, connection: Connection) -> dict[str, str]:
+    def delete_user(self, username: str, connection: Connection) -> dict[str, str]:  # noqa: ARG002
         """
         Overseerr connections are info-only, no deletion needed.
 
         Args:
-            username: Username to delete
-            connection: Connection object with URL and API key
+            username: Username to delete (unused - info-only)
+            connection: Connection object with URL and API key (unused - info-only)
 
         Returns:
             Dict with 'status' and 'message' keys
@@ -54,12 +58,12 @@ class OverseerrClient(CompanionClient):
             "message": "Overseerr users managed automatically",
         }
 
-    def test_connection(self, connection: Connection) -> dict[str, str]:
+    def test_connection(self, connection: Connection) -> dict[str, str]:  # noqa: ARG002
         """
         Test connection for Overseerr (info-only).
 
         Args:
-            connection: Connection object with URL and API key
+            connection: Connection object with URL and API key (unused - info-only)
 
         Returns:
             Dict with 'status' and 'message' keys

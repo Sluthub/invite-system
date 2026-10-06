@@ -10,12 +10,13 @@ from .audiobookrequest import AudiobookrequestClient
 from .base import CompanionClient
 from .ombi import OmbiClient
 from .overseerr import OverseerrClient
+from .seerr import SeerrClient
 
 __all__ = [
     "CompanionClient",
     "get_companion_client",
-    "register_companion_client",
     "list_companion_types",
+    "register_companion_client",
 ]
 
 # Registry of companion client implementations
@@ -42,6 +43,7 @@ def get_companion_client(connection_type: str) -> type[CompanionClient]:
 def list_companion_types() -> list[tuple[str, str]]:
     """Return list of (value, label) tuples for all registered companion types."""
     return [
+        ("seerr", "Seerr (Jellyfin user import)"),
         ("ombi", "Ombi"),
         ("overseerr", "Overseerr/Jellyseerr (Info Only)"),
         ("audiobookrequest", "Audiobookrequest"),
@@ -51,4 +53,5 @@ def list_companion_types() -> list[tuple[str, str]]:
 # Register all companion clients
 register_companion_client("ombi")(OmbiClient)
 register_companion_client("overseerr")(OverseerrClient)
+register_companion_client("seerr")(SeerrClient)
 register_companion_client("audiobookrequest")(AudiobookrequestClient)

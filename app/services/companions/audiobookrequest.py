@@ -5,6 +5,7 @@ Audiobookrequest companion client implementation.
 import logging
 
 import requests
+import requests.exceptions
 
 from app.models import Connection
 
@@ -23,14 +24,18 @@ class AudiobookrequestClient(CompanionClient):
         return "Audiobookrequest"
 
     def invite_user(
-        self, username: str, email: str, connection: Connection, password: str = ""
+        self,
+        username: str,
+        email: str,  # noqa: ARG002
+        connection: Connection,
+        password: str = "",
     ) -> dict[str, str]:
         """
         Invite a user to Audiobookrequest.
 
         Args:
             username: Username to invite
-            email: Email address
+            email: Email address (unused - AudioBookRequest API doesn't use email)
             connection: Connection object with URL and API key
             password: Password for the user (optional, defaults to empty string)
 
@@ -42,8 +47,9 @@ class AudiobookrequestClient(CompanionClient):
 
         try:
             # Create user in Audiobookrequest
+            # Note: AudioBookRequest API doesn't use email field, only username/password/group/root
             resp = requests.post(
-                f"{connection.url}/api/users",
+                f"{connection.url}/api/users/",
                 headers={
                     "Authorization": f"Bearer {connection.api_key}",
                     "Content-Type": "application/json",
@@ -52,7 +58,6 @@ class AudiobookrequestClient(CompanionClient):
                     "username": username,
                     "password": password
                     or "temporary_password_123",  # Use provided password or fallback
-                    "email": email,
                     "group": "untrusted",  # Default group (untrusted, trusted, or admin)
                     "root": False,  # Not root user
                 },
@@ -85,7 +90,7 @@ class AudiobookrequestClient(CompanionClient):
             )
             return {
                 "status": "error",
-                "message": f"Error inviting user to {connection.name}: {str(exc)}",
+                "message": f"Error inviting user to {connection.name}: {exc!s}",
             }
 
     def delete_user(self, username: str, connection: Connection) -> dict[str, str]:
@@ -148,7 +153,7 @@ class AudiobookrequestClient(CompanionClient):
             )
             return {
                 "status": "error",
-                "message": f"Error deleting user from {connection.name}: {str(exc)}",
+                "message": f"Error deleting user from {connection.name}: {exc!s}",
             }
 
     def test_connection(self, connection: Connection) -> dict[str, str]:
@@ -205,5 +210,5 @@ class AudiobookrequestClient(CompanionClient):
         except Exception as exc:
             return {
                 "status": "error",
-                "message": f"Connection test failed: {str(exc)}",
+                "message": f"Connection test failed: {exc!s}",
             }

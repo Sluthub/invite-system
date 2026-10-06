@@ -12,12 +12,30 @@ from flask import (
     url_for,
 )
 from flask_login import login_required
+from sqlalchemy import delete, select, update
 
 from app.extensions import db
-from app.models import Library, MediaServer, User
-from app.services.media.service import scan_libraries_for_server
+from app.models import (
+    ActivitySession,
+    ActivitySnapshot,
+    Connection,
+    ExpiredUser,
+    HistoricalImportJob,
+    Invitation,
+    Library,
+    MediaServer,
+    User,
+    invitation_servers,
+    invitation_users,
+)
+from app.services.media.service import (
+    list_users_for_server,
+    scan_libraries_for_server,
+    upsert_scanned_libraries,
+)
 from app.services.servers import (
     check_audiobookshelf,
+    check_drop,
     check_emby,
     check_jellyfin,
     check_kavita,
@@ -38,6 +56,8 @@ def _check_connection(data: dict):
         return check_emby(data["server_url"], data["api_key"])
     if stype == "audiobookshelf":
         return check_audiobookshelf(data["server_url"], data["api_key"])
+    if stype == "drop":
+        return check_drop(data["server_url"], data["api_key"])
     if stype == "romm":
         username = data.get("server_username", "").strip()
         password = data.get("server_password", "").strip()
@@ -116,6 +136,16 @@ def create_server():
                     lib.enabled = True
                     db.session.add(lib)
             db.session.commit()
+
+        # Automatically sync users from the newly added server
+        try:
+            list_users_for_server(server)
+        except Exception as exc:
+            # Log the error but don't fail the server creation
+            import logging
+
+            logging.error(f"Failed to sync users for new server {server.name}: {exc}")
+
         return redirect(url_for("media_servers.list_servers"))
     # GET
     return render_template("modals/create-server.html", error="")
@@ -126,7 +156,7 @@ def create_server():
 def scan_server_libraries(server_id):
     server = MediaServer.query.get_or_404(server_id)
     try:
-        items = scan_libraries_for_server(server)
+        items, authoritative = scan_libraries_for_server(server)
     except Exception as exc:
         error_message = str(exc) if str(exc) else "Library scan failed"
         flash(f"Library scan failed: {exc}", "error")
@@ -135,23 +165,11 @@ def scan_server_libraries(server_id):
             500,
         )
 
-    # items may be dict or list[str]
-    pairs = (
-        items.items() if isinstance(items, dict) else [(name, name) for name in items]
-    )
-
-    seen_ids = set()
-    for fid, name in pairs:
-        seen_ids.add(fid)
-        lib = Library.query.filter_by(external_id=fid, server_id=server.id).first()
-        if lib:
-            lib.name = name
-        else:
-            lib = Library()
-            lib.external_id = fid
-            lib.name = name
-            lib.server_id = server.id
-            db.session.add(lib)
+    # Upsert scanned libraries, preserving each row's enabled flag and invite
+    # associations. `enabled` is the admin's saved selection and this scan runs
+    # when the edit form OPENS, so resetting it would wipe the checkboxes being
+    # rendered.
+    upsert_scanned_libraries(server, items, authoritative=authoritative)
     db.session.commit()
 
     # Render checkboxes partial (reuse existing partials)
@@ -205,20 +223,78 @@ def edit_server(server_id):
 @media_servers_bp.route("/", methods=["DELETE"])
 @login_required
 def delete_server():
-    server_id = request.args.get("delete")
-    if server_id:
-        # 1) Delete local DB users that belong to this server so no ghost
-        #    accounts linger once the server entry is gone.
-        (
-            User.query.filter(User.server_id == int(server_id)).delete(
-                synchronize_session=False
-            )
-        )
+    """Delete a media server and all its dependent records.
 
-        # 2) Finally remove the MediaServer itself.
-        MediaServer.query.filter_by(id=server_id).delete(synchronize_session=False)
-        db.session.commit()
-    return "", 204
+    Cascade deletes (via foreign key constraints) will automatically remove:
+    - Users (User.server_id)
+    - Libraries (Library.server_id)
+    - ExpiredUsers (ExpiredUser.server_id)
+    - ActivitySessions (ActivitySession.server_id)
+    - HistoricalImportJobs (HistoricalImportJob.server_id)
+
+    SET NULL (via foreign key constraints) will preserve:
+    - Invitations (Invitation.server_id will be set to NULL)
+    """
+    server_id = request.args.get("delete", type=int)
+    if server_id is not None:
+        server = MediaServer.query.get(server_id)
+        if server:
+            # Manually clear dependent rows to avoid legacy FK RESTRICT schemas on SQLite
+            session_ids = select(ActivitySession.id).where(
+                ActivitySession.server_id == server.id
+            )
+            db.session.execute(
+                delete(ActivitySnapshot).where(
+                    ActivitySnapshot.session_id.in_(session_ids)
+                )
+            )
+            db.session.execute(
+                delete(ActivitySession).where(ActivitySession.server_id == server.id)
+            )
+            db.session.execute(
+                delete(HistoricalImportJob).where(
+                    HistoricalImportJob.server_id == server.id
+                )
+            )
+            db.session.execute(
+                delete(Connection).where(Connection.media_server_id == server.id)
+            )
+            db.session.execute(delete(Library).where(Library.server_id == server.id))
+            db.session.execute(
+                delete(ExpiredUser).where(ExpiredUser.server_id == server.id)
+            )
+            db.session.execute(delete(User).where(User.server_id == server.id))
+            # Clear invitation association rows pointing to this server
+            db.session.execute(
+                update(invitation_users)
+                .where(invitation_users.c.server_id == server.id)
+                .values(server_id=None)
+            )
+            db.session.execute(
+                delete(invitation_servers).where(
+                    invitation_servers.c.server_id == server.id
+                )
+            )
+            # Remove invitations tied to this server (primary or multi-server)
+            invitations = Invitation.query.filter(
+                db.or_(
+                    Invitation.server_id == server.id,
+                    Invitation.servers.any(id=server.id),
+                )
+            ).all()
+            for invite in invitations:
+                # Ensure association rows are cleared in case legacy FKs don't cascade
+                invite.servers = []
+                invite.libraries = []
+                invite.users = []
+                db.session.delete(invite)
+            # Database CASCADE constraints handle all dependent records automatically
+            db.session.delete(server)
+            db.session.commit()
+    if request.headers.get("HX-Request"):
+        servers = MediaServer.query.order_by(MediaServer.name).all()
+        return render_template("settings/servers.html", servers=servers)
+    return redirect(url_for("media_servers.list_servers"))
 
 
 # -------------------------- NEW ENDPOINT ---------------------------
@@ -290,10 +366,49 @@ def get_server_statistics(server_id):
     except Exception as e:
         return jsonify(
             {
-                "error": f"Failed to get statistics: {str(e)}",
+                "error": f"Failed to get statistics: {e!s}",
                 "server_name": server.name,
                 "server_type": server.server_type,
                 "server_id": server.id,
+            }
+        ), 500
+
+
+@media_servers_bp.get("/<int:server_id>/health")
+@login_required
+def get_server_health(server_id):
+    """Return lightweight health statistics without triggering user sync."""
+    server = MediaServer.query.get_or_404(server_id)
+
+    try:
+        # Import the service to get the appropriate client
+        from app.services.media.service import get_media_client
+
+        client = get_media_client(server.server_type, media_server=server)
+        if not client:
+            return jsonify(
+                {"error": f"No client available for server type: {server.server_type}"}
+            ), 400
+
+        # Use the new lightweight readonly statistics method
+        stats = client.get_readonly_statistics()
+        stats["server_name"] = server.name
+        stats["server_type"] = server.server_type
+        stats["server_id"] = server.id
+
+        return jsonify(stats)
+
+    except Exception as e:
+        return jsonify(
+            {
+                "error": f"Failed to get health statistics: {e!s}",
+                "server_name": server.name,
+                "server_type": server.server_type,
+                "server_id": server.id,
+                "user_stats": {"total_users": 0, "active_sessions": 0},
+                "server_stats": {"version": "Unknown", "transcoding_sessions": 0},
+                "library_stats": {},
+                "content_stats": {},
             }
         ), 500
 
@@ -306,29 +421,36 @@ def get_all_statistics():
     all_stats = {}
 
     for server in servers:
+        # Extract server data before making client calls to avoid session corruption
+        server_data = {
+            "id": server.id,
+            "name": server.name,
+            "server_type": server.server_type,
+        }
+
         try:
             from app.services.media.service import get_media_client
 
-            client = get_media_client(server.server_type, media_server=server)
+            client = get_media_client(server_data["server_type"], media_server=server)
             if client:
                 stats = client.statistics()
-                stats["server_name"] = server.name
-                stats["server_type"] = server.server_type
-                stats["server_id"] = server.id
-                all_stats[server.id] = stats
+                stats["server_name"] = server_data["name"]
+                stats["server_type"] = server_data["server_type"]
+                stats["server_id"] = server_data["id"]
+                all_stats[server_data["id"]] = stats
             else:
-                all_stats[server.id] = {
-                    "error": f"No client available for server type: {server.server_type}",
-                    "server_name": server.name,
-                    "server_type": server.server_type,
-                    "server_id": server.id,
+                all_stats[server_data["id"]] = {
+                    "error": f"No client available for server type: {server_data['server_type']}",
+                    "server_name": server_data["name"],
+                    "server_type": server_data["server_type"],
+                    "server_id": server_data["id"],
                 }
         except Exception as e:
-            all_stats[server.id] = {
-                "error": f"Failed to get statistics: {str(e)}",
-                "server_name": server.name,
-                "server_type": server.server_type,
-                "server_id": server.id,
+            all_stats[server_data["id"]] = {
+                "error": f"Failed to get statistics: {e!s}",
+                "server_name": server_data["name"],
+                "server_type": server_data["server_type"],
+                "server_id": server_data["id"],
             }
 
     return jsonify(all_stats)
@@ -346,29 +468,88 @@ def get_statistics_by_type(server_type):
     type_stats = {}
 
     for server in servers:
+        # Extract server data before making client calls to avoid session corruption
+        server_data = {
+            "id": server.id,
+            "name": server.name,
+            "server_type": server.server_type,
+        }
+
         try:
             from app.services.media.service import get_media_client
 
-            client = get_media_client(server.server_type, media_server=server)
+            client = get_media_client(server_data["server_type"], media_server=server)
             if client:
                 stats = client.statistics()
-                stats["server_name"] = server.name
-                stats["server_type"] = server.server_type
-                stats["server_id"] = server.id
-                type_stats[server.id] = stats
+                stats["server_name"] = server_data["name"]
+                stats["server_type"] = server_data["server_type"]
+                stats["server_id"] = server_data["id"]
+                type_stats[server_data["id"]] = stats
             else:
-                type_stats[server.id] = {
-                    "error": f"No client available for server type: {server.server_type}",
-                    "server_name": server.name,
-                    "server_type": server.server_type,
-                    "server_id": server.id,
+                type_stats[server_data["id"]] = {
+                    "error": f"No client available for server type: {server_data['server_type']}",
+                    "server_name": server_data["name"],
+                    "server_type": server_data["server_type"],
+                    "server_id": server_data["id"],
                 }
         except Exception as e:
-            type_stats[server.id] = {
-                "error": f"Failed to get statistics: {str(e)}",
-                "server_name": server.name,
-                "server_type": server.server_type,
-                "server_id": server.id,
+            type_stats[server_data["id"]] = {
+                "error": f"Failed to get statistics: {e!s}",
+                "server_name": server_data["name"],
+                "server_type": server_data["server_type"],
+                "server_id": server_data["id"],
             }
 
     return jsonify(type_stats)
+
+
+@media_servers_bp.get("/health/all")
+@login_required
+def get_all_health():
+    """Return lightweight health statistics for all servers without triggering user sync."""
+    servers = MediaServer.query.all()
+    all_health = {}
+
+    for server in servers:
+        # Extract server data before making client calls to avoid session corruption
+        server_data = {
+            "id": server.id,
+            "name": server.name,
+            "server_type": server.server_type,
+        }
+
+        try:
+            from app.services.media.service import get_media_client
+
+            client = get_media_client(server_data["server_type"], media_server=server)
+            if client:
+                # Use lightweight readonly statistics instead of full statistics
+                stats = client.get_readonly_statistics()
+                stats["server_name"] = server_data["name"]
+                stats["server_type"] = server_data["server_type"]
+                stats["server_id"] = server_data["id"]
+                all_health[server_data["id"]] = stats
+            else:
+                all_health[server_data["id"]] = {
+                    "error": f"No client available for server type: {server_data['server_type']}",
+                    "server_name": server_data["name"],
+                    "server_type": server_data["server_type"],
+                    "server_id": server_data["id"],
+                    "user_stats": {"total_users": 0, "active_sessions": 0},
+                    "server_stats": {"version": "Unknown", "transcoding_sessions": 0},
+                    "library_stats": {},
+                    "content_stats": {},
+                }
+        except Exception as e:
+            all_health[server_data["id"]] = {
+                "error": f"Failed to get health: {e!s}",
+                "server_name": server_data["name"],
+                "server_type": server_data["server_type"],
+                "server_id": server_data["id"],
+                "user_stats": {"total_users": 0, "active_sessions": 0},
+                "server_stats": {"version": "Unknown", "transcoding_sessions": 0},
+                "library_stats": {},
+                "content_stats": {},
+            }
+
+    return jsonify(all_health)

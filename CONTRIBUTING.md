@@ -1,35 +1,20 @@
-# Contributing Guide
+# Contributing
 
-Wizarr is proud to be an open-source project. We welcome any contributions made by the community to the project.
+Sluthub invitations uses the current Flask application at the repository root.
+Install Python dependencies with `uv sync --locked --dev`. Install and build the
+static frontend with `npm ci` and `npm run build` in `app/static`.
 
-## Getting Started
+Use Python 3.13 and Node 24. Set `DATABASE_DIR` to a private development directory
+before importing the application, then run `uv run flask db upgrade` and
+`uv run flask run`. Keep live configuration and databases outside Git.
 
-We highly recommend joining our Discord before beginning your work. There, you can discuss with the development team about what you'd like to contribute to verify it is not already in progress and avoid duplicate work.
+Run `uv run --locked --dev ruff check .` and
+`uv run --locked --dev pytest -m 'not e2e'` for local checks. The Linux CI also
+builds the static frontend and runs the Chromium browser tests. Install its
+browser with `uv run --locked --dev playwright install chromium` when running
+those tests locally.
 
-## Prerequisites
-
-- Python 3.10+
-- pip
-- npm
-- node
-
-## Guidelines
-
-We require following conventional commit guidelines in relation to commit messages and branch naming.
-
-[Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/)
-
-[Branch and Commit Conventions](https://dev.to/varbsan/a-simplified-convention-for-naming-branches-and-commits-in-git-il4)
-
-## Contributing to Wizarr
-
-We highly recommend using VSCode as your IDE. There is a code workspace already created to assist in organizing the project.
-
-1. Fork the repository in GitHub
-2. Clone your forked repository with `git clone git@github.com:<YOUR_USERNAME>/wizarr.git`
-3. Move into the directory `cd wizarr`
-4. Run the script to setup your local environment: `./scripts/setup-build-environment.sh`
-5. Use VSCode and open the `develop.code-workspace` file under File -> Open Workspace from File, or type `code develop.code-workspace` in your terminal.
-6. Inside the Nx Console panel of VSCode, you have access to the project targets. Run the build target for both wizarr-backend and wizarr-frontend. Then run the serve target to begin your work.
-7. Visit http://127.0.0.1:5173 (Frontend) and http://127.0.0.1:5000 (Backend) to see your changes in realtime.
-8. Create a new branch from 'develop' following conventions, commit your work, and open a PR against the 'develop' branch when you are ready for the team to review your contribution.
+Use conventional commit messages. Keep source refreshes, behavior changes and
+deployment changes in reviewable checkpoints. Read
+[the Sluthub migration guide](docs/sluthub-upgrade.md) before changing the
+database or deployment layout.

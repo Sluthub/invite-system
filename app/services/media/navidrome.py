@@ -6,11 +6,13 @@ import random
 import string
 from typing import TYPE_CHECKING, Any
 
+import structlog
 from sqlalchemy import or_
 
 from app.extensions import db
-from app.models import Invitation, Library, User
+from app.models import Invitation, User
 from app.services.invites import is_invite_valid
+from app.services.media.utils import StandardizedPermissions
 
 from .client_base import RestApiMixin, register_media_client
 
@@ -48,7 +50,7 @@ class NavidromeClient(RestApiMixin):
         salt = "".join(random.choices(string.ascii_letters + string.digits, k=6))
 
         # Create MD5 hash of password + salt
-        token_hash = hashlib.md5((self.token + salt).encode()).hexdigest()
+        token_hash = hashlib.md5((self.token + salt).encode()).hexdigest()  # noqa: S324  # Required by Subsonic API specification
 
         return {
             "u": "admin",  # Default username for API access
@@ -90,7 +92,7 @@ class NavidromeClient(RestApiMixin):
             return False, "Server did not respond properly"
         except Exception as exc:
             logging.error("Navidrome: connection validation failed – %s", exc)
-            return False, f"Connection failed: {str(exc)}"
+            return False, f"Connection failed: {exc!s}"
 
     def libraries(self) -> dict[str, str]:
         """Return mapping of library_id → display_name."""
@@ -145,6 +147,10 @@ class NavidromeClient(RestApiMixin):
 
         users_by_name = {u["username"]: u for u in users_data}
 
+        known_users = User.query.filter(User.server_id == server_id).all()
+        if self._skip_prune_on_empty_remote(not users_by_name, known_users):
+            return known_users
+
         try:
             # Add new users or update existing ones
             for username, remote in users_by_name.items():
@@ -182,17 +188,33 @@ class NavidromeClient(RestApiMixin):
         # Enhance users with policy data from Navidrome
         for user in users:
             if user.username in users_by_name:
-                # Navidrome users can always download/sync music
-                user.allow_downloads = True
-                user.allow_sync = True
-                # No live TV in music servers
-                user.allow_live_tv = False
-            else:
-                # Default values if user data not found
-                user.allow_downloads = False
-                user.allow_live_tv = False
-                user.allow_sync = False
+                navidrome_user = users_by_name[user.username]
 
+                # Use standardized permissions helper for consistency
+                permissions = StandardizedPermissions.for_navidrome(navidrome_user)
+
+                # Update standardized User model columns
+                user.allow_downloads = permissions.allow_downloads
+                user.allow_live_tv = permissions.allow_live_tv
+                user.is_admin = permissions.is_admin
+            else:
+                # Default values if user data not found - use standardized helper
+                default_permissions = StandardizedPermissions.for_basic_server(
+                    "navidrome"
+                )
+
+                # Update standardized User model columns with defaults
+                user.allow_downloads = default_permissions.allow_downloads
+                user.allow_live_tv = default_permissions.allow_live_tv
+                user.is_admin = default_permissions.is_admin
+
+        # Single commit for all metadata updates
+        try:
+            db.session.commit()
+        except Exception as e:
+            logging.error("Navidrome: failed to update user metadata – %s", e)
+            db.session.rollback()
+            return []
         return users
 
     def create_user(
@@ -250,6 +272,46 @@ class NavidromeClient(RestApiMixin):
             logging.error("Navidrome: failed to update user %s – %s", username, exc)
             raise
 
+    def enable_user(self, user_id: str) -> bool:  # noqa: ARG002
+        """Enable a user account on Navidrome.
+
+        Args:
+            user_id: The user's Navidrome ID (unused - Navidrome doesn't support enable/disable)
+
+        Returns:
+            bool: True if the user was successfully enabled, False otherwise
+        """
+        try:
+            # Navidrome doesn't have a direct enable feature
+            # Return False to indicate this operation is not supported
+            structlog.get_logger().warning(
+                "Navidrome does not support enabling users. They need to be given library access."
+            )
+            return False
+        except Exception as e:
+            structlog.get_logger().error(f"Failed to enable Navidrome user: {e}")
+            return False
+
+    def disable_user(self, user_id: str) -> bool:  # noqa: ARG002
+        """Disable a user account on Navidrome.
+
+        Args:
+            user_id: The user's Navidrome usernameFailed to disable
+
+        Returns:
+            bool: True if the user was successfully disabled, False otherwise
+        """
+        try:
+            # Navidrome doesn't have a disable feature, we can only delete users
+            # Return False to indicate this operation is not supported
+            structlog.get_logger().warning(
+                "Navidrome does not support disabling users, only deletion"
+            )
+            return False
+        except Exception as e:
+            structlog.get_logger().error(f"Failed to disable Navidrome user: {e}")
+            return False
+
     def delete_user(self, username: str):
         """Delete a user permanently from Navidrome."""
         try:
@@ -274,50 +336,43 @@ class NavidromeClient(RestApiMixin):
             "permissions": {"admin": details.is_admin},
         }
 
-    def get_user_details(self, username: str) -> MediaUserDetails:
+    def get_user_details(self, user_identifier: str | int) -> MediaUserDetails:
         """Get detailed user information in standardized format."""
-        from app.services.media.user_details import MediaUserDetails, UserLibraryAccess
+        username = str(user_identifier)
+        from app.services.media.utils import (
+            LibraryAccessHelper,
+            StandardizedPermissions,
+            create_standardized_user_details,
+        )
 
         # Get raw user data from Navidrome API
         result = self._subsonic_request("getUser", {"username": username})
         raw_user = result.get("user", {})
 
-        # All users have access to all libraries in Navidrome
-        libs_q = (
-            Library.query.filter_by(server_id=self.server_id, enabled=True)
-            .order_by(Library.name)
-            .all()
-        )
-        library_access = [
-            UserLibraryAccess(
-                library_id=lib.external_id, library_name=lib.name, has_access=True
-            )
-            for lib in libs_q
-        ]
+        # Extract standardized permissions using shared utility
+        permissions = StandardizedPermissions.for_navidrome(raw_user)
 
-        # Extract policies information
-        filtered_policies = {
-            "adminRole": raw_user.get("adminRole", False),
-            "downloadRole": raw_user.get("downloadRole", True),
-            "uploadRole": raw_user.get("uploadRole", False),
-            "playlistRole": raw_user.get("playlistRole", True),
-            "streamRole": raw_user.get("streamRole", True),
-        }
+        # Navidrome gives full access to all libraries
+        library_access = LibraryAccessHelper.create_full_access()
 
-        return MediaUserDetails(
+        return create_standardized_user_details(
             user_id=username,
             username=raw_user.get("username", username),
             email=raw_user.get("email"),
-            is_admin=raw_user.get("adminRole", False),
-            is_enabled=True,  # Navidrome doesn't have disabled users concept
+            permissions=permissions,
+            library_access=library_access,
             created_at=None,  # Navidrome doesn't expose creation date
             last_active=None,  # Navidrome doesn't expose last seen
-            library_access=library_access,
-            raw_policies=filtered_policies,
+            is_enabled=True,  # Navidrome doesn't have disabled users concept
         )
 
     def _do_join(
-        self, username: str, password: str, confirm: str, email: str, code: str
+        self,
+        username: str,
+        password: str,
+        confirm: str,
+        email: str,
+        code: str,
     ):
         """Public invite flow for Navidrome users."""
         if not 1 <= len(username) <= 50:
@@ -483,6 +538,72 @@ class NavidromeClient(RestApiMixin):
                 "library_stats": {},
                 "user_stats": {},
                 "server_stats": {},
+                "content_stats": {},
+                "error": str(e),
+            }
+
+    def get_user_count(self) -> int:
+        """Get lightweight user count from database without triggering sync."""
+        try:
+            from app.models import MediaServer, User
+
+            if hasattr(self, "server_id") and self.server_id:
+                count = User.query.filter_by(server_id=self.server_id).count()
+            else:
+                # Fallback for legacy settings: find MediaServer for this server type
+                servers = MediaServer.query.filter_by(server_type="navidrome").all()
+                if servers:
+                    server_ids = [s.id for s in servers]
+                    count = User.query.filter(User.server_id.in_(server_ids)).count()
+                else:
+                    # Ultimate fallback: no easy API for user count in Navidrome
+                    count = 0
+            return count
+        except Exception as e:
+            logging.error(f"Failed to get Navidrome user count from database: {e}")
+            return 0
+
+    def get_server_info(self) -> dict:
+        """Get lightweight server information without triggering user sync."""
+        try:
+            # Navidrome doesn't have traditional sessions/transcoding
+            return {
+                "version": "Unknown",  # Would need API call to get version
+                "transcoding_sessions": 0,  # Navidrome doesn't transcode
+                "active_sessions": 0,  # Would need to implement session tracking
+            }
+        except Exception as e:
+            logging.error(f"Failed to get Navidrome server info: {e}")
+            return {
+                "version": "Unknown",
+                "transcoding_sessions": 0,
+                "active_sessions": 0,
+            }
+
+    def get_readonly_statistics(self) -> dict:
+        """Get lightweight statistics without triggering user synchronization."""
+        try:
+            user_count = self.get_user_count()
+            server_info = self.get_server_info()
+
+            return {
+                "user_stats": {
+                    "total_users": user_count,
+                    "active_sessions": server_info.get("active_sessions", 0),
+                },
+                "server_stats": {
+                    "version": server_info.get("version", "Unknown"),
+                    "transcoding_sessions": server_info.get("transcoding_sessions", 0),
+                },
+                "library_stats": {},
+                "content_stats": {},
+            }
+        except Exception as e:
+            logging.error(f"Failed to get Navidrome readonly statistics: {e}")
+            return {
+                "user_stats": {"total_users": 0, "active_sessions": 0},
+                "server_stats": {"version": "Unknown", "transcoding_sessions": 0},
+                "library_stats": {},
                 "content_stats": {},
                 "error": str(e),
             }

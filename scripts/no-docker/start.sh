@@ -1,11 +1,9 @@
-#!/bin/bash
-set -e
-
+#!/bin/sh
+set -eu
 cd "$(dirname "$0")/../.."
-source venv/bin/activate
-
-export DATABASE_DIR="$PWD/data/database"
-export LATEST_FILE="$PWD/latest"
-
-cd dist/apps/wizarr-backend
-gunicorn --worker-class geventwebsocket.gunicorn.workers.GeventWebSocketWorker --bind 127.0.0.1:5000 -m 007 run:app 2>&1
+export DATABASE_DIR="${DATABASE_DIR:-$PWD/data/database}"
+export HOST="${HOST:-127.0.0.1}"
+export PORT="${PORT:-5000}"
+export FLASK_ENV=production
+FLASK_SKIP_SCHEDULER=true .venv/bin/flask db upgrade
+exec .venv/bin/gunicorn --config gunicorn.conf.py run:app

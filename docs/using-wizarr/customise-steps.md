@@ -9,9 +9,10 @@ Give your new users a personalized onboarding experience with Wizarr's powerful 
 Wizarr's wizard system supports multiple approaches for creating and managing onboarding steps:
 
 1. **Database-backed steps** (recommended) - Create and manage steps through the admin interface
-2. **Wizard bundles** - Custom sequences of steps for specific invitation types
-3. **Multi-server wizards** - Automatic flows for invitations covering multiple servers
-4. **Legacy file-based steps** - Markdown files as fallback (still supported)
+2. **Pre-invite and post-invite categories** - Show steps before or after users accept invitations ([Learn more](pre-post-invite-steps.md))
+3. **Wizard bundles** - Custom sequences of steps for specific invitation types
+4. **Multi-server wizards** - Automatic flows for invitations covering multiple servers
+5. **Legacy file-based steps** - Markdown files as fallback (still supported)
 
 ***
 
@@ -34,9 +35,13 @@ Default steps are server-type specific and will be shown to all users invited to
 ### Step Fields
 
 - **Server Type**: Which media server this step applies to
+- **Category**: When to show this step - "Before Invite Acceptance" (pre-invite) or "After Invite Acceptance" (post-invite)
 - **Title**: Optional override for the step heading
 - **Markdown**: The main content of your step
 - **Requires**: Comma-separated setting keys that must be truthy for the step to display
+- **Require Interaction**: When enabled, users must click a link or button in the step before they can proceed to the next step
+
+> **New Feature**: The **Category** field allows you to control whether steps are shown before or after users accept invitations. [Learn more about pre-invite and post-invite steps](pre-post-invite-steps.md).
 
 ### Conditional Step Display
 
@@ -68,6 +73,7 @@ Bundle steps are different from default steps:
 - **No server type** - they're not tied to a specific media server
 - **Flexible ordering** - drag and drop to reorder steps within the bundle
 - **Custom content** - can include any markdown content you want
+- **Interaction requirements** - can also be configured to require user interaction
 
 ### Assigning Bundles to Invitations
 
@@ -126,24 +132,61 @@ Welcome to our **media server**! Here's what you need to know:
 - **Images**: Use standard Markdown syntax with optional classes
 - **Tailwind classes**: Add `{.class-name}` for custom styling
 
-### Interactive Elements
+### Templates in Shared Bundles
 
-Make your steps interactive by requiring user engagement:
+You can import and export third-party bundles. Wizarr stores their content and applies the same rendering rules to imported and edited steps.
+
+Templates can use `server_name`, `server_type`, `server_url`, and `external_url`. The same values are available through `settings`, for example `settings.server_name`. Other application settings, credentials, sessions, and Python objects are not available.
+
+Use `{{ _("Welcome") }}` for translations. Use `{% if external_url %}...{% endif %}` for conditions. Supported filters are `default` (`d`), `escape` (`e`), `upper`, `lower`, `title`, `trim`, `capitalize`, `length`, and `urlencode`.
+
+Cards, buttons, and media widgets remain available. For example:
 
 ```markdown
----
-title: Download Required
-require: true
----
+|||
+## {{ _("Welcome") }}
 
-# Download the App
+{{ server_name }}
 
-Please download our app before continuing.
-
-[Download Now](https://example.com/download){:target="_blank" .btn}
+{{ widget:button url="external_url" text=_("Open") }}
+|||
 ```
 
-When `require: true` is set, the Next button stays disabled until the user clicks a link or button.
+Templates cannot use loops, assignments, macros, template imports, or arbitrary function calls. Rewrite these constructs as display text, conditions, or widgets. Wizarr shows a step error if a template uses an unsupported construct.
+
+Wizarr removes scripts, event handlers, executable links, and application action attributes from rendered HTML. Titles display as plain text. The Discord widget preset keeps its restricted iframe. Other iframe sources are removed. Put custom styles in the application stylesheet; imported style blocks are removed.
+
+### Requiring User Interaction
+
+You can force users to engage with step content before allowing them to proceed to the next step. This is useful for ensuring users actually download apps, read important information, or acknowledge terms.
+
+#### How It Works
+
+1. **Enable "Require Interaction"** when creating or editing a step in the admin interface
+2. **Add interactive elements** like links or buttons to your step content
+3. **Users must click** on at least one link or button before the "Next" button becomes enabled
+
+#### Example Step Content
+
+```markdown
+# Download the Plex App
+
+Before you can access our media library, you'll need to download the Plex app for your device.
+
+**Choose your platform:**
+
+[📱 Download for iOS](https://apps.apple.com/app/plex/id383457673){:target="_blank" .btn}
+[🤖 Download for Android](https://play.google.com/store/apps/details?id=com.plexapp.android){:target="_blank" .btn}
+[💻 Download for Windows](https://www.plex.tv/media-server-downloads/?cat=plex+desktop&plat=windows#plex-app){:target="_blank" .btn}
+
+Click one of the download buttons above to continue.
+```
+
+#### Visual Feedback
+
+- **Disabled Next Button**: Appears dimmed with reduced opacity until interaction occurs
+- **Visual Indicators**: The button shows "not-allowed" cursor when hovered
+- **Automatic Enable**: As soon as the user clicks any link or button, the Next button becomes active
 
 ***
 
@@ -267,6 +310,7 @@ Only shows if `discord_url` is set in the `requires` field.
 - **Use clear calls-to-action** - make buttons and links obvious
 - **Test on mobile** - many users will access on phones
 - **Include screenshots** - visual aids help understanding
+- **Use interaction requirements wisely** - only require interaction for critical steps like app downloads or terms acceptance
 
 ### Step Organization
 
@@ -306,6 +350,7 @@ If you're upgrading from an older version with file-based steps:
 | Wrong step order | Verify position values in database |
 | Missing steps | Check `requires` field conditions |
 | Bundle not working | Verify bundle assignment on invitation |
+| Next button won't enable | Ensure step has interactive elements (links/buttons) and interaction requirement is properly configured |
 
 ### Debug Tips
 

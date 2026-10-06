@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import datetime
 import logging
 import re
 import time
 from typing import TYPE_CHECKING, Any
 
 import requests
+import structlog
 from sqlalchemy import or_
 
 from app.extensions import db
@@ -14,6 +14,7 @@ from app.models import Invitation, Library, User
 from app.services.invites import is_invite_valid
 
 from .client_base import RestApiMixin, register_media_client
+from .utils import StandardizedPermissions
 
 if TYPE_CHECKING:
     from app.services.media.user_details import MediaUserDetails
@@ -69,7 +70,7 @@ class AudiobookshelfClient(RestApiMixin):
 
         except Exception as exc:
             logging.error("ABS: connection validation failed – %s", exc)
-            return False, f"Connection failed: {str(exc)}"
+            return False, f"Connection failed: {exc!s}"
 
     def get_server_status(self) -> dict[str, Any]:
         """Get server status information.
@@ -184,80 +185,226 @@ class AudiobookshelfClient(RestApiMixin):
             )
             return {"results": [], "total": 0, "limit": limit, "page": page}
 
+    def get_recent_items(
+        self, library_id: str | None = None, limit: int = 10
+    ) -> list[dict]:
+        """Get recently added items from AudiobookShelf server."""
+        try:
+            items = []
+
+            # Get all libraries or specific library if provided
+            if library_id:
+                libraries = [{"id": library_id}]
+            else:
+                try:
+                    libs_response = self.libraries()
+                    libraries = [{"id": lib_id} for lib_id in libs_response]
+                except Exception:
+                    libraries = []
+
+            for library in libraries:
+                if len(items) >= limit:
+                    break
+
+                try:
+                    # Get personalized view which includes recently added items
+                    response = self.get(
+                        f"{self.API_PREFIX}/libraries/{library['id']}/personalized"
+                    )
+                    response.raise_for_status()
+                    data = response.json()
+
+                    # Look for recently added items in the personalized view
+                    for view in data:
+                        if (
+                            view.get("category") == "newestItems"
+                            or "recent" in view.get("label", "").lower()
+                        ):
+                            entities = view.get("entities", [])
+
+                            for entity in entities:
+                                if len(items) >= limit:
+                                    break
+
+                                # Only include items with cover images (posters)
+                                media = entity.get("media", {})
+                                cover_path = media.get("coverPath")
+
+                                if cover_path:
+                                    # Use the proper API endpoint for item covers
+                                    cover_url = (
+                                        f"{self.url}/api/items/{entity.get('id')}/cover"
+                                    )
+
+                                    # Generate secure proxy URL with opaque token
+                                    thumb_url = self.generate_image_proxy_url(cover_url)
+
+                                    # Extract metadata
+                                    metadata = media.get("metadata", {})
+                                    title = metadata.get("title") or entity.get(
+                                        "name", "Unknown"
+                                    )
+
+                                    # Extract year from publication date
+                                    year = None
+                                    pub_year = metadata.get("publishedYear")
+                                    if pub_year:
+                                        from contextlib import suppress
+
+                                        with suppress(ValueError, TypeError):
+                                            year = int(pub_year)
+
+                                    # Get media type (book, podcast, etc.)
+                                    media_type = entity.get("mediaType", "book").lower()
+
+                                    # Get added date
+                                    added_at = entity.get("addedAt")
+                                    if added_at:
+                                        try:
+                                            # Convert timestamp to ISO format
+                                            import datetime
+
+                                            dt = datetime.datetime.fromtimestamp(
+                                                added_at / 1000, tz=datetime.UTC
+                                            )
+                                            added_at = dt.isoformat()
+                                        except Exception:
+                                            added_at = None
+
+                                    items.append(
+                                        {
+                                            "title": title,
+                                            "year": year,
+                                            "thumb": thumb_url,
+                                            "type": media_type,
+                                            "added_at": added_at,
+                                        }
+                                    )
+
+                            # Found recently added items, break from views loop
+                            if items:
+                                break
+
+                except Exception as exc:
+                    logging.debug(f"Failed to get recent items for library: {exc}")
+                    continue
+
+            return items
+
+        except Exception:
+            return []
+
     # --- users ---------------------------------------------------------
 
+    def _get_server_users(self) -> list[User]:
+        """Get all users for this server from database."""
+        return User.query.filter(User.server_id == self.server_id).all()
+
+    def _extract_abs_permissions(self, abs_user: dict) -> dict[str, bool]:
+        """Extract all permissions from an Audiobookshelf user object."""
+        permissions = abs_user.get("permissions", {}) or {}
+        user_type = abs_user.get("type", "user")
+
+        # Admin or guest type
+        is_admin = user_type == "admin"
+        allow_downloads = (
+            permissions.get("download", True) if user_type != "guest" else False
+        )
+
+        return {
+            "is_admin": is_admin,
+            "allow_downloads": allow_downloads,
+            "allow_live_tv": False,  # ABS doesn't have live TV
+            "allow_camera_upload": False,  # ABS doesn't have camera upload
+        }
+
+    def _get_user_library_access(self, abs_user: dict) -> tuple[list[str] | None, bool]:
+        """Extract library access: (library_names | None, has_full_access)."""
+        if (abs_user.get("permissions", {}) or {}).get("accessAllLibraries", False):
+            return None, True
+
+        if not (accessible_libs := abs_user.get("librariesAccessible", []) or []):
+            return [], False
+
+        library_names = [
+            lib.name
+            for lib_id in accessible_libs
+            if (
+                lib := Library.query.filter_by(
+                    external_id=lib_id, server_id=self.server_id
+                ).first()
+            )
+        ]
+        return library_names, False
+
+    def _sync_user_permissions(self, user: User, abs_user: dict) -> None:
+        """Sync permissions and library access from Audiobookshelf to database user."""
+        user.username = abs_user.get("username", user.username)
+        user.email = abs_user.get("email", user.email)
+
+        # Store permissions in SQL columns
+        perms = self._extract_abs_permissions(abs_user)
+        user.is_admin = perms["is_admin"]
+        user.allow_downloads = perms["allow_downloads"]
+        user.allow_live_tv = perms["allow_live_tv"]
+        user.allow_camera_upload = perms["allow_camera_upload"]
+
+        # Store library access
+        library_names, has_full_access = self._get_user_library_access(abs_user)
+        user.set_accessible_libraries(library_names if not has_full_access else None)
+
     def list_users(self) -> list[User]:
-        """Read users from Audiobookshelf and reflect them locally."""
-        server_id = getattr(self, "server_id", None)
-        if server_id is None:
+        """Sync users from Audiobookshelf to database with all permissions and library access."""
+        if not self.server_id:
             return []
 
         try:
             response = self.get(f"{self.API_PREFIX}/users")
             response.raise_for_status()
             data = response.json()
-
-            # Handle both direct array and wrapped response formats
             raw_users = data if isinstance(data, list) else data.get("users", [])
         except Exception as exc:
             logging.warning("ABS: failed to list users – %s", exc)
-            return []
+            return self._get_server_users()
 
-        raw_by_id = {u["id"]: u for u in raw_users}
+        abs_users_by_id = {u["id"]: u for u in raw_users}
+
+        known_users = self._get_server_users()
+        if self._skip_prune_on_empty_remote(not abs_users_by_id, known_users):
+            return known_users
+
+        # Remove users no longer in Audiobookshelf, add new users
+        for db_user in known_users:
+            if db_user.token not in abs_users_by_id:
+                db.session.delete(db_user)
+
+        for uid, abs_user in abs_users_by_id.items():
+            if not User.query.filter_by(token=uid, server_id=self.server_id).first():
+                db.session.add(
+                    User(
+                        token=uid,
+                        username=abs_user.get("username", "abs-user"),
+                        email=abs_user.get("email", ""),
+                        code="empty",
+                        server_id=self.server_id,
+                    )
+                )
+
+        # Sync all permissions and library access
+        for user in self._get_server_users():
+            if abs_user := abs_users_by_id.get(user.token):
+                self._sync_user_permissions(user, abs_user)
 
         try:
-            # Add new users or update existing ones
-            for uid, remote in raw_by_id.items():
-                db_row = User.query.filter_by(token=uid, server_id=server_id).first()
-                if not db_row:
-                    db_row = User(
-                        token=uid,
-                        username=remote.get("username", "abs-user"),
-                        email=remote.get("email", ""),
-                        code="empty",
-                        server_id=server_id,
-                    )
-                    db.session.add(db_row)
-                else:
-                    db_row.username = remote.get("username", db_row.username)
-                    db_row.email = remote.get("email", db_row.email)
-
-            # Remove users that no longer exist upstream
-            to_check = User.query.filter(User.server_id == server_id).all()
-            for local in to_check:
-                if local.token not in raw_by_id:
-                    db.session.delete(local)
-
             db.session.commit()
-
-        except Exception as exc:
-            logging.error("ABS: failed to sync users – %s", exc)
+            logging.info(
+                f"Synced {len(abs_users_by_id)} Audiobookshelf users to database"
+            )
+        except Exception as e:
+            logging.error(f"Failed to sync Audiobookshelf user metadata: {e}")
             db.session.rollback()
-            return []
 
-        # Get users with policy information
-        users = User.query.filter(User.server_id == server_id).all()
-
-        # Enhance users with policy data from AudiobookShelf
-        for user in users:
-            if user.token in raw_by_id:
-                abs_user = raw_by_id[user.token]
-                permissions = abs_user.get("permissions", {}) or {}
-
-                # Add policy attributes for AudiobookShelf
-                user.allow_downloads = permissions.get("download", True)
-                # AudiobookShelf doesn't have Live TV, so default to False
-                user.allow_live_tv = False
-                user.allow_sync = permissions.get(
-                    "download", True
-                )  # Same as downloads for ABS
-            else:
-                # Default values if user data not found
-                user.allow_downloads = False
-                user.allow_live_tv = False
-                user.allow_sync = False
-
-        return users
+        return self._get_server_users()
 
     # --- user management ------------------------------------------------
 
@@ -275,8 +422,12 @@ class AudiobookshelfClient(RestApiMixin):
         The ABS API expects at least ``username``.  A password can be an
         empty string (guest), but Wizarr always passes one.
         """
+        # Use standardized permissions for consistency
+        std_permissions = StandardizedPermissions.for_basic_server(
+            "audiobookshelf", is_admin, allow_downloads
+        )
         permissions = {
-            "download": allow_downloads,
+            "download": std_permissions.allow_downloads,
             "update": False,
             "delete": False,
             "upload": False,
@@ -321,6 +472,167 @@ class AudiobookshelfClient(RestApiMixin):
             logging.error("ABS: failed to update user %s – %s", user_id, exc)
             raise
 
+    def update_user_permissions(
+        self, _user_identifier: str, _permissions: dict[str, bool]
+    ) -> bool:
+        """Update user permissions on Audiobookshelf.
+
+        Args:
+            _user_identifier: User's Audiobookshelf ID (external_id from database)
+            _permissions: Dict with keys: allow_downloads, allow_live_tv, allow_camera_upload
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            # Get current user to preserve existing settings
+            try:
+                current = self.get_user(_user_identifier)
+            except Exception as exc:
+                logging.error(f"ABS: Failed to get user {_user_identifier} – {exc}")
+                return False
+
+            # Get current permissions or create new ones
+            current_perms = current.get("permissions", {}) or {}
+
+            # Update only the download permission (ABS doesn't have live TV or camera upload)
+            current_perms["download"] = _permissions.get("allow_downloads", False)
+
+            # Prepare payload with updated permissions
+            payload = {"permissions": current_perms}
+
+            # Update user
+            response = self.patch(
+                f"{self.API_PREFIX}/users/{_user_identifier}", json=payload
+            )
+            success = response.status_code == 200
+
+            if success:
+                logging.info(
+                    f"Successfully updated permissions for Audiobookshelf user {_user_identifier}"
+                )
+            return success
+
+        except Exception as e:
+            logging.error(
+                f"Failed to update Audiobookshelf permissions for {_user_identifier}: {e}"
+            )
+            return False
+
+    def update_user_libraries(
+        self, _user_identifier: str, _library_names: list[str] | None
+    ) -> bool:
+        """Update user's library access on Audiobookshelf.
+
+        Args:
+            _user_identifier: User's Audiobookshelf ID (external_id from database)
+            _library_names: List of library names to grant access to, or None for all libraries
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            # Get current user to preserve existing settings
+            try:
+                current = self.get_user(_user_identifier)
+            except Exception as exc:
+                logging.error(f"ABS: Failed to get user {_user_identifier} – {exc}")
+                return False
+
+            current_perms = current.get("permissions", {}) or {}
+
+            # Get library external IDs from database
+            library_ids = []
+            if _library_names is not None:
+                logging.info(f"AUDIOBOOKSHELF: Requested libraries: {_library_names}")
+                libraries = (
+                    Library.query.filter_by(server_id=self.server_id)
+                    .filter(Library.name.in_(_library_names))
+                    .all()
+                )
+
+                for lib in libraries:
+                    library_ids.append(lib.external_id)
+                    logging.info(f"  ✓ {lib.name} -> {lib.external_id}")
+
+                # Check for missing libraries
+                found_names = {lib.name for lib in libraries}
+                missing = set(_library_names) - found_names
+                for name in missing:
+                    logging.warning(
+                        f"  ✗ Library '{name}' not found in database (scan libraries to fix)"
+                    )
+
+                logging.info(f"AUDIOBOOKSHELF: Converted to library IDs: {library_ids}")
+            else:
+                # None means all libraries
+                logging.info("AUDIOBOOKSHELF: Granting access to all libraries")
+
+            # Update permissions with library access settings
+            current_perms["accessAllLibraries"] = _library_names is None
+
+            # Prepare payload
+            payload = {
+                "permissions": current_perms,
+                "librariesAccessible": library_ids
+                if _library_names is not None
+                else [],
+            }
+
+            # Update user
+            response = self.patch(
+                f"{self.API_PREFIX}/users/{_user_identifier}", json=payload
+            )
+            success = response.status_code == 200
+
+            if success:
+                logging.info(
+                    f"Successfully updated library access for Audiobookshelf user {_user_identifier}"
+                )
+            return success
+
+        except Exception as e:
+            logging.error(
+                f"Failed to update Audiobookshelf library access for {_user_identifier}: {e}"
+            )
+            return False
+
+    def enable_user(self, user_id: str) -> bool:
+        """Enable a user account on Audiobookshelf.
+
+        Args:
+            user_id: The user's Audiobookshelf ID
+
+        Returns:
+            bool: True if the user was successfully enabled, False otherwise
+        """
+        try:
+            # Audiobookshelf uses isActive field to enable/disable users
+            payload = {"isActive": True}
+            response = self.patch(f"/api/users/{user_id}", json=payload)
+            return response.status_code == 200
+        except Exception as e:
+            structlog.get_logger().error(f"Failed to enable Audiobookshelf user: {e}")
+            return False
+
+    def disable_user(self, user_id: str) -> bool:
+        """Disable a user account on Audiobookshelf.
+
+        Args:
+            user_id: The user's Audiobookshelf ID
+
+        Returns:
+            bool: True if the user was successfully disabled, False otherwise
+        """
+        try:
+            # Audiobookshelf uses isActive field to enable/disable users
+            payload = {"isActive": False}
+            response = self.patch(f"/api/users/{user_id}", json=payload)
+            return response.status_code == 200
+        except Exception as e:
+            structlog.get_logger().error(f"Failed to disable Audiobookshelf user: {e}")
+            return False
+
     def delete_user(self, user_id: str):
         """Delete a user permanently from Audiobookshelf."""
         try:
@@ -340,93 +652,56 @@ class AudiobookshelfClient(RestApiMixin):
             "username": details.username,
             "email": details.email,
             "isActive": details.is_enabled,
-            "createdAt": int(details.created_at.timestamp() * 1000)
-            if details.created_at
-            else None,
-            "lastSeen": int(details.last_active.timestamp() * 1000)
-            if details.last_active
-            else None,
-            "permissions": {"admin": details.is_admin},
+            "permissions": {
+                "admin": details.is_admin,
+                "download": details.allow_downloads,
+            },
         }
 
-    def get_user_details(self, user_id: str) -> MediaUserDetails:
-        """Get detailed user information in standardized format."""
-        from app.models import Library
+    def get_user_details(self, user_identifier: str | int) -> MediaUserDetails:
+        """Get detailed user information from database (no API calls)."""
         from app.services.media.user_details import MediaUserDetails, UserLibraryAccess
 
-        # Get raw user data from AudiobookShelf API
-        response = self.get(f"{self.API_PREFIX}/users/{user_id}")
-        response.raise_for_status()
-        raw_user = response.json()
-        permissions = raw_user.get("permissions", {}) or {}
+        user_id = str(user_identifier)
+        if not (
+            user := User.query.filter_by(
+                token=user_id, server_id=self.server_id
+            ).first()
+        ):
+            raise ValueError(f"No user found with id {user_id}")
 
-        # Extract library access
-        access_all = permissions.get("accessAllLibraries", False)
-        accessible_libs = raw_user.get("librariesAccessible", []) or []
-
-        if not access_all and accessible_libs:
-            # User has restricted library access
-            libs_q = (
-                Library.query.filter(
-                    Library.external_id.in_(accessible_libs),
-                    Library.server_id == self.server_id,
-                )
-                .order_by(Library.name)
-                .all()
-            )
+        # Build library access from stored names
+        library_access = None
+        if library_names := user.get_accessible_libraries():
+            libs_by_name = {
+                lib.name: lib
+                for lib in Library.query.filter(
+                    Library.server_id == self.server_id, Library.name.in_(library_names)
+                ).all()
+            }
             library_access = [
                 UserLibraryAccess(
-                    library_id=lib.external_id, library_name=lib.name, has_access=True
+                    library_id=lib.external_id
+                    if (lib := libs_by_name.get(name))
+                    else f"abs_{name}",
+                    library_name=name,
+                    has_access=True,
                 )
-                for lib in libs_q
+                for name in library_names
             ]
-        else:
-            # Full access - get all enabled libraries for this server
-            libs_q = (
-                Library.query.filter_by(server_id=self.server_id, enabled=True)
-                .order_by(Library.name)
-                .all()
-            )
-            library_access = [
-                UserLibraryAccess(
-                    library_id=lib.external_id, library_name=lib.name, has_access=True
-                )
-                for lib in libs_q
-            ]
-
-        # Extract only admin-relevant policies information
-        filtered_policies = {
-            "isActive": raw_user.get("isActive", True),
-            "type": raw_user.get("type", "user"),
-            "hasOpenIDLink": raw_user.get("hasOpenIDLink", False),
-        }
-
-        # Add useful permission info
-        if permissions:
-            filtered_policies.update(
-                {
-                    "download": permissions.get("download", False),
-                    "accessAllLibraries": permissions.get("accessAllLibraries", True),
-                    "accessExplicitContent": permissions.get(
-                        "accessExplicitContent", False
-                    ),
-                }
-            )
 
         return MediaUserDetails(
-            user_id=user_id,
-            username=raw_user.get("username", "Unknown"),
-            email=raw_user.get("email"),
-            is_admin=permissions.get("admin", False),
-            is_enabled=raw_user.get("isActive", True),
-            created_at=datetime.datetime.fromtimestamp(raw_user["createdAt"] / 1000)
-            if raw_user.get("createdAt")
-            else None,
-            last_active=datetime.datetime.fromtimestamp(raw_user["lastSeen"] / 1000)
-            if raw_user.get("lastSeen")
-            else None,
+            user_id=user.token,
+            username=user.username,
+            email=user.email,
+            is_admin=user.is_admin or False,
+            is_enabled=True,
+            created_at=None,
+            last_active=None,
+            allow_downloads=user.allow_downloads or False,
+            allow_live_tv=user.allow_live_tv or False,
+            allow_camera_upload=user.allow_camera_upload or False,
             library_access=library_access,
-            raw_policies=filtered_policies,
         )
 
     # ------------------------------------------------------------------
@@ -445,11 +720,15 @@ class AudiobookshelfClient(RestApiMixin):
         If *library_ids* is empty, the account will be granted access to all
         libraries (ABS default behaviour).
         """
-        # Fetch current user object so that we do not accidentally wipe other fields
+        # Fetch current user object from API so that we do not accidentally wipe other fields
+        # NOTE: Must use API call here, not database lookup, because this is called during
+        # invitation acceptance before the user is added to the database
         try:
-            current = self.get_user(user_id)
+            response = self.get(f"{self.API_PREFIX}/users/{user_id}")
+            response.raise_for_status()
+            current = response.json()
         except Exception as exc:
-            logging.warning("ABS: failed to read user %s – %s", user_id, exc)
+            logging.warning("ABS: failed to read user %s from API – %s", user_id, exc)
             return
 
         perms = current.get("permissions", {}) or {}
@@ -470,7 +749,12 @@ class AudiobookshelfClient(RestApiMixin):
             logging.exception("ABS: failed to update permissions for %s", user_id)
 
     def _do_join(
-        self, username: str, password: str, confirm: str, email: str, code: str
+        self,
+        username: str,
+        password: str,
+        confirm: str,
+        email: str,
+        code: str,
     ):
         """Public invite flow for Audiobookshelf users."""
         if not self.EMAIL_RE.fullmatch(email):
@@ -619,7 +903,7 @@ class AudiobookshelfClient(RestApiMixin):
                 return []  # Nothing playing at all
 
             # --- Step 2: fetch the last page with a fixed page size -------------
-            items_per_page = 10  # sane default – plenty for a dashboard
+            items_per_page = 20  # fetch more items for dashboard visibility
             last_page = max(0, (total_sessions - 1) // items_per_page)  # zero-based
 
             query_params = {"itemsPerPage": str(items_per_page), "page": str(last_page)}
@@ -631,30 +915,25 @@ class AudiobookshelfClient(RestApiMixin):
             logging.error("ABS: failed to fetch sessions – %s", exc)
             return []
 
-        # ------------------------------------------------------------------
-        # Build user-id → username mapping so dashboard shows names instead of
-        # raw UUIDs.  One request is sufficient and relatively cheap.
-        # ------------------------------------------------------------------
-        user_name_by_id: dict[str, str] = {}
-        try:
-            users_response = self.get(f"{self.API_PREFIX}/users")
-            users_response.raise_for_status()
-            users_json = users_response.json()
-
-            # Handle both direct array and wrapped response formats
-            if isinstance(users_json, list):
-                users_list = users_json
-            else:
-                users_list = users_json.get("users", [])
-
-            for u in users_list:
-                if isinstance(u, dict) and u.get("id"):
-                    user_name_by_id[str(u["id"])] = u.get("username", "user")
-        except Exception as exc:
-            # If the call fails we fall back to raw IDs – no fatal error.
-            logging.debug("ABS: failed to fetch user names for sessions – %s", exc)
-
+        # Collect user IDs present in the active sessions so downstream services
+        # can resolve friendly names from the local cache without hammering the
+        # Audiobookshelf `/users` endpoint on every poll.
         now_ms = int(time.time() * 1000)  # current time in ms (ABS uses ms)
+
+        local_usernames: dict[str, str] = {}
+        if db is not None and getattr(self, "server_id", None):
+            try:
+                users = (
+                    User.query.with_entities(User.token, User.username)
+                    .filter(User.server_id == self.server_id)
+                    .all()
+                )
+                local_usernames = {
+                    str(token): username for token, username in users if username
+                }
+            except Exception as exc:
+                logging.debug("ABS: failed to resolve user names locally – %s", exc)
+
         active: list[dict] = []
 
         for raw in sessions:
@@ -668,7 +947,25 @@ class AudiobookshelfClient(RestApiMixin):
             # --- basic metadata ------------------------------------------------
             session_id = str(raw.get("id", ""))
             user_id = str(raw.get("userId", ""))
-            user_display = user_name_by_id.get(user_id, user_id)
+
+            user_info = raw.get("user") or {}
+            if not isinstance(user_info, dict):
+                user_info = {}
+
+            abs_username = (
+                user_info.get("username")
+                or user_info.get("displayName")
+                or user_info.get("name")
+            )
+
+            user_display = (
+                local_usernames.get(user_id)
+                or raw.get("userDisplayName")
+                or raw.get("username")
+                or abs_username
+                or user_id
+                or "Unknown"
+            )
             media_type = raw.get("mediaType", "book")
             title = raw.get("displayTitle", "Unknown")
 
@@ -727,6 +1024,7 @@ class AudiobookshelfClient(RestApiMixin):
             play_state = "playing"
 
             session_data = {
+                "user_id": user_id,
                 "user_name": user_display,
                 "media_title": title,
                 "media_type": media_type,
@@ -739,7 +1037,7 @@ class AudiobookshelfClient(RestApiMixin):
                 "duration_ms": int(duration * 1000),
                 "artwork_url": artwork_url,
                 "thumbnail_url": thumb_url,
-                "transcoding": transcoding_info,
+                "transcoding_info": transcoding_info,
             }
 
             # Add audio metadata if available
@@ -1017,7 +1315,7 @@ class AudiobookshelfClient(RestApiMixin):
 
     # RestApiMixin overrides -------------------------------------------------
 
-    def _headers(self) -> dict[str, str]:  # type: ignore[override]
+    def _headers(self) -> dict[str, str]:  # type: ignore
         """Return default headers including Authorization if a token is set."""
         headers: dict[str, str] = {
             "Accept": "application/json",
@@ -1044,3 +1342,97 @@ class AudiobookshelfClient(RestApiMixin):
                 f"Server error ({response.status_code}){' for ' + context if context else ''}"
             )
         response.raise_for_status()
+
+    def get_user_count(self) -> int:
+        """Get lightweight user count from database without triggering sync."""
+        try:
+            # Count existing users in database for this server instead of API call
+            from app.models import MediaServer, User
+
+            if hasattr(self, "server_id") and self.server_id:
+                count = User.query.filter_by(server_id=self.server_id).count()
+            else:
+                # Fallback for legacy settings: find MediaServer for this server type
+                # and count users for all AudiobookShelf servers
+                abs_servers = MediaServer.query.filter_by(
+                    server_type="audiobookshelf"
+                ).all()
+                if abs_servers:
+                    server_ids = [s.id for s in abs_servers]
+                    count = User.query.filter(User.server_id.in_(server_ids)).count()
+                else:
+                    # Ultimate fallback: API call
+                    try:
+                        users_response = self.get(f"{self.API_PREFIX}/users")
+                        users_response.raise_for_status()
+                        users_data = users_response.json()
+
+                        # Handle both direct array and wrapped response formats
+                        if isinstance(users_data, list):
+                            users_list = users_data
+                        else:
+                            users_list = users_data.get("users", [])
+
+                        count = len(users_list) if isinstance(users_list, list) else 0
+                    except Exception as api_error:
+                        logging.warning(
+                            f"AudiobookShelf API fallback failed: {api_error}"
+                        )
+                        count = 0
+            return count
+        except Exception as e:
+            logging.error(f"Failed to get AudiobookShelf user count from database: {e}")
+            return 0
+
+    def get_server_info(self) -> dict:
+        """Get lightweight server information without triggering user sync."""
+        try:
+            # AudiobookShelf doesn't have traditional "sessions" like Plex/Jellyfin
+            # We can get basic server info though
+            try:
+                status = self.get("/status").json()
+                version = status.get("serverVersion", "Unknown")
+            except Exception as e:
+                logging.warning(f"Failed to get AudiobookShelf server info: {e}")
+                version = "Unknown"
+
+            return {
+                "version": version,
+                "transcoding_sessions": 0,  # AudiobookShelf doesn't transcode
+                "active_sessions": 0,  # Would need to implement session tracking
+            }
+        except Exception as e:
+            logging.error(f"Failed to get AudiobookShelf server info: {e}")
+            return {
+                "version": "Unknown",
+                "transcoding_sessions": 0,
+                "active_sessions": 0,
+            }
+
+    def get_readonly_statistics(self) -> dict:
+        """Get lightweight statistics without triggering user synchronization."""
+        try:
+            user_count = self.get_user_count()
+            server_info = self.get_server_info()
+
+            return {
+                "user_stats": {
+                    "total_users": user_count,
+                    "active_sessions": server_info.get("active_sessions", 0),
+                },
+                "server_stats": {
+                    "version": server_info.get("version", "Unknown"),
+                    "transcoding_sessions": server_info.get("transcoding_sessions", 0),
+                },
+                "library_stats": {},  # Minimal for health cards
+                "content_stats": {},  # Minimal for health cards
+            }
+        except Exception as e:
+            logging.error(f"Failed to get AudiobookShelf readonly statistics: {e}")
+            return {
+                "user_stats": {"total_users": 0, "active_sessions": 0},
+                "server_stats": {"version": "Unknown", "transcoding_sessions": 0},
+                "library_stats": {},
+                "content_stats": {},
+                "error": str(e),
+            }

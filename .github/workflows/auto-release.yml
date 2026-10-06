@@ -1,0 +1,239 @@
+# DISABLED: This workflow is redundant with create-release.yml
+# Both workflows were trying to create releases from the same Release PRs
+# causing conflicts. Using create-release.yml as the canonical release creator.
+
+name: Auto Release (DISABLED)
+
+on:
+  # Disabled to avoid conflicts with create-release.yml
+  # pull_request:
+  #   branches: [main]
+  #   types: [closed]
+  workflow_dispatch:  # Keep for manual testing only
+
+jobs:
+  check-release:
+    runs-on: ubuntu-24.04
+    if: |
+      github.event.pull_request.merged == true && 
+      startsWith(github.event.pull_request.title, 'Release v') &&
+      github.repository_owner == 'wizarrrr'
+    permissions:
+      contents: write
+      
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 2  # Need to compare with previous commit
+          
+      - name: Get version info
+        id: version-check
+        run: |
+          # Extract version from Release PR title (e.g., "Release v2025.9.1" -> "2025.9.1")
+          PR_TITLE="${{ github.event.pull_request.title }}"
+          RELEASE_VERSION=$(echo "$PR_TITLE" | sed 's/Release v//')
+          
+          # Get current version from pyproject.toml
+          CURRENT_VERSION=$(grep '^version = ' pyproject.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
+          
+          echo "Release PR version: $RELEASE_VERSION"
+          echo "Current code version: $CURRENT_VERSION"
+          
+          # Verify versions match and it's not a pre-release
+          if [[ "$CURRENT_VERSION" == "$RELEASE_VERSION" ]] && [[ ! "$CURRENT_VERSION" =~ -rc\.|-(alpha|beta|dev) ]]; then
+            echo "version-changed=true" >> $GITHUB_OUTPUT
+            echo "new-version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+          else
+            echo "version-changed=false" >> $GITHUB_OUTPUT
+            echo "Version mismatch or pre-release detected, skipping release creation"
+          fi
+          
+      - name: Generate changelog
+        if: steps.version-check.outputs.version-changed == 'true'
+        id: changelog
+        run: |
+          NEW_VERSION="${{ steps.version-check.outputs.new-version }}"
+          PREVIOUS_VERSION="${{ steps.version-check.outputs.previous-version }}"
+          
+          # Find the tag for the previous version
+          PREV_TAG="v$PREVIOUS_VERSION"
+          if ! git tag -l | grep -q "^$PREV_TAG$"; then
+            PREV_TAG="$PREVIOUS_VERSION"
+          fi
+          if ! git tag -l | grep -q "^$PREV_TAG$"; then
+            # Fallback to latest tag
+            PREV_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          fi
+          
+          # Generate changelog
+          if [[ -n "$PREV_TAG" ]]; then
+            COMMITS=$(git log "${PREV_TAG}..HEAD" --oneline --no-merges)
+          else
+            COMMITS=$(git log --oneline --no-merges | head -20)  # Last 20 commits if no tag
+          fi
+          
+          if [[ -z "$COMMITS" ]]; then
+            CHANGELOG="No changes since last release."
+          else
+            CHANGELOG="## What's Changed\n\n"
+
+            # Group commits by type with comprehensive detection
+            FEATURES=""
+            FIXES=""
+            DOCS=""
+            PERF=""
+            REFACTOR=""
+            TEST=""
+            BUILD=""
+            CI=""
+            STYLE=""
+            CHORE=""
+            BREAKING=""
+            OTHER=""
+
+            while IFS= read -r line; do
+              COMMIT_FULL_MSG=$(echo "$line" | sed 's/^[a-fA-F0-9]* //')
+
+              # Check for breaking changes first (can be any type)
+              if echo "$COMMIT_FULL_MSG" | grep -qE "(BREAKING CHANGE|!):?"; then
+                BREAKING+="- $COMMIT_FULL_MSG\n"
+              # Features
+              elif echo "$line" | grep -qE "^[a-fA-F0-9]+ feat(\([^)]+\))?(!)?:"; then
+                COMMIT_MSG=$(echo "$line" | sed 's/^[a-fA-F0-9]* feat[^:]*: *//')
+                FEATURES+="- $COMMIT_MSG\n"
+              # Bug fixes
+              elif echo "$line" | grep -qE "^[a-fA-F0-9]+ fix(\([^)]+\))?(!)?:"; then
+                COMMIT_MSG=$(echo "$line" | sed 's/^[a-fA-F0-9]* fix[^:]*: *//')
+                FIXES+="- $COMMIT_MSG\n"
+              # Documentation
+              elif echo "$line" | grep -qE "^[a-f0-9]+ docs(\([^)]+\))?(!)?:"; then
+                COMMIT_MSG=$(echo "$line" | sed 's/^[a-f0-9]* docs[^:]*: *//')
+                DOCS+="- $COMMIT_MSG\n"
+              # Performance improvements
+              elif echo "$line" | grep -qE "^[a-fA-F0-9]+ perf(\([^)]+\))?(!)?:"; then
+                COMMIT_MSG=$(echo "$line" | sed 's/^[a-fA-F0-9]* perf[^:]*: *//')
+                PERF+="- $COMMIT_MSG\n"
+              # Code refactoring
+              elif echo "$line" | grep -qE "^[a-fA-F0-9]+ refactor(\([^)]+\))?(!)?:"; then
+                COMMIT_MSG=$(echo "$line" | sed 's/^[a-fA-F0-9]* refactor[^:]*: *//')
+                REFACTOR+="- $COMMIT_MSG\n"
+              # Testing
+              elif echo "$line" | grep -qE "^[a-fA-F0-9]+ test(\([^)]+\))?(!)?:"; then
+                COMMIT_MSG=$(echo "$line" | sed 's/^[a-fA-F0-9]* test[^:]*: *//')
+                TEST+="- $COMMIT_MSG\n"
+              # Build system / dependencies
+              elif echo "$line" | grep -qE "^[a-fA-F0-9]+ (build|deps?)(\([^)]+\))?(!)?:"; then
+                COMMIT_MSG=$(echo "$line" | sed 's/^[a-fA-F0-9]* \(build\|deps\?\)[^:]*: *//')
+                BUILD+="- $COMMIT_MSG\n"
+              # CI/CD changes
+              elif echo "$line" | grep -qE "^[a-fA-F0-9]+ ci(\([^)]+\))?(!)?:"; then
+                COMMIT_MSG=$(echo "$line" | sed 's/^[a-fA-F0-9]* ci[^:]*: *//')
+                CI+="- $COMMIT_MSG\n"
+              # Code style changes
+              elif echo "$line" | grep -qE "^[a-fA-F0-9]+ style(\([^)]+\))?(!)?:"; then
+                COMMIT_MSG=$(echo "$line" | sed 's/^[a-fA-F0-9]* style[^:]*: *//')
+                STYLE+="- $COMMIT_MSG\n"
+              # Chores and maintenance
+              elif echo "$line" | grep -qE "^[a-fA-F0-9]+ chore(\([^)]+\))?(!)?:"; then
+                COMMIT_MSG=$(echo "$line" | sed 's/^[a-fA-F0-9]* chore[^:]*: */')
+                CHORE+="- $COMMIT_MSG\n"
+              # Non-conventional commits
+              else
+                OTHER+="- $COMMIT_FULL_MSG\n"
+              fi
+            done <<< "$COMMITS"
+
+            # Output sections in priority order
+            if [[ -n "$BREAKING" ]]; then
+              CHANGELOG+="### 💥 Breaking Changes\n$BREAKING\n"
+            fi
+
+            if [[ -n "$FEATURES" ]]; then
+              CHANGELOG+="### 🚀 Features\n$FEATURES\n"
+            fi
+
+            if [[ -n "$FIXES" ]]; then
+              CHANGELOG+="### 🐛 Bug Fixes\n$FIXES\n"
+            fi
+
+            if [[ -n "$PERF" ]]; then
+              CHANGELOG+="### ⚡ Performance Improvements\n$PERF\n"
+            fi
+
+            if [[ -n "$REFACTOR" ]]; then
+              CHANGELOG+="### ♻️ Code Refactoring\n$REFACTOR\n"
+            fi
+
+            if [[ -n "$DOCS" ]]; then
+              CHANGELOG+="### 📚 Documentation\n$DOCS\n"
+            fi
+
+            if [[ -n "$TEST" ]]; then
+              CHANGELOG+="### 🧪 Tests\n$TEST\n"
+            fi
+
+            if [[ -n "$BUILD" ]]; then
+              CHANGELOG+="### 🔧 Build System / Dependencies\n$BUILD\n"
+            fi
+
+            if [[ -n "$CI" ]]; then
+              CHANGELOG+="### 👷 CI/CD\n$CI\n"
+            fi
+
+            if [[ -n "$STYLE" ]]; then
+              CHANGELOG+="### 💄 Styling\n$STYLE\n"
+            fi
+
+            if [[ -n "$CHORE" ]]; then
+              CHANGELOG+="### 🧹 Chores\n$CHORE\n"
+            fi
+
+            if [[ -n "$OTHER" ]]; then
+              CHANGELOG+="### 📝 Other Changes\n$OTHER\n"
+            fi
+
+            CHANGELOG+="\n**Full Changelog**: https://github.com/$GITHUB_REPOSITORY/compare/${PREV_TAG}...v${NEW_VERSION}"
+          fi
+          
+          # Save changelog to file for GitHub release
+          echo -e "$CHANGELOG" > changelog.md
+          
+      - name: Create GitHub Release
+        if: steps.version-check.outputs.version-changed == 'true'
+        id: create-release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          NEW_VERSION="${{ steps.version-check.outputs.new-version }}"
+          
+          # Check if release already exists
+          if gh release view "v$NEW_VERSION" >/dev/null 2>&1; then
+            echo "Release v$NEW_VERSION already exists, skipping creation"
+            echo "release-created=false" >> $GITHUB_OUTPUT
+          else
+            gh release create "v$NEW_VERSION" \
+              --title "v$NEW_VERSION" \
+              --notes-file changelog.md
+            echo "release-created=true" >> $GITHUB_OUTPUT
+          fi
+            
+      - name: Summary
+        if: steps.version-check.outputs.version-changed == 'true'
+        run: |
+          NEW_VERSION="${{ steps.version-check.outputs.new-version }}"
+          if [[ "${{ steps.create-release.outputs.release-created }}" == "true" ]]; then
+            echo "🚀 **Auto-Release Created!**" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "- **Version**: v$NEW_VERSION" >> $GITHUB_STEP_SUMMARY
+            echo "- **Release URL**: https://github.com/$GITHUB_REPOSITORY/releases/tag/v$NEW_VERSION" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "This will trigger Docker builds and deployment!" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "ℹ️ **Release Already Exists**" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "- **Version**: v$NEW_VERSION" >> $GITHUB_STEP_SUMMARY
+            echo "- **Release URL**: https://github.com/$GITHUB_REPOSITORY/releases/tag/v$NEW_VERSION" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Release v$NEW_VERSION already exists, skipped creation." >> $GITHUB_STEP_SUMMARY
+          fi

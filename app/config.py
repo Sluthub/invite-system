@@ -3,6 +3,7 @@ import json
 import os
 import secrets
 from pathlib import Path
+from typing import ClassVar
 
 from dotenv import load_dotenv
 
@@ -17,11 +18,13 @@ load_dotenv(BASE_DIR / ".env")
 # Use /data/database for container deployments, fall back to local for development
 
 
-if os.path.exists("/data"):
+if os.getenv("DATABASE_DIR"):
+    DATABASE_DIR = Path(os.environ["DATABASE_DIR"]).expanduser().resolve()
+elif Path("/data").exists():
     DATABASE_DIR = Path("/data/database")
 else:
     DATABASE_DIR = BASE_DIR / "database"
-DATABASE_DIR.mkdir(exist_ok=True)
+DATABASE_DIR.mkdir(parents=True, exist_ok=True)
 
 SESSION_CACHELIB = RobustFileSystemCache(
     str(DATABASE_DIR / "sessions"),
@@ -45,7 +48,7 @@ def load_secrets():
         return {}
 
     try:
-        with open(SECRETS_FILE) as f:
+        with SECRETS_FILE.open() as f:
             return json.load(f)
     except (json.JSONDecodeError, FileNotFoundError):
         return {}
@@ -54,9 +57,9 @@ def load_secrets():
 def save_secrets(secrets_dict):
     """Save secrets to the secrets file."""
     # Ensure database directory exists
-    DATABASE_DIR.mkdir(exist_ok=True)
+    DATABASE_DIR.mkdir(parents=True, exist_ok=True)
 
-    with open(SECRETS_FILE, "w") as f:
+    with SECRETS_FILE.open("w") as f:
         json.dump(secrets_dict, f, indent=2)
 
 
@@ -80,26 +83,51 @@ class BaseConfig:
     SESSION_CACHELIB = SESSION_CACHELIB  # Reference the module-level cache
 
     # Babel / i18n
-    LANGUAGES = {
-        "en": "english",
-        "de": "german",
-        "zh": "chinese",
-        "fr": "french",
-        "sv": "swedish",
-        "pt": "portuguese",
-        "pt_BR": "portuguese",
-        "lt": "lithuanian",
-        "es": "spanish",
-        "ca": "catalan",
-        "pl": "polish",
+    LANGUAGES: ClassVar[dict[str, str]] = {
+        "en": "English",
+        "ca": "Catalan",
+        "cs": "Czech",
+        "da": "Danish",
+        "de": "German",
+        "es": "Spanish",
+        "fa": "Persian",
+        "fr": "French",
+        "gsw": "Swiss German",
+        "he": "Hebrew",
+        "hr": "Croatian",
+        "hu": "Hungarian",
+        "is": "Icelandic",
+        "it": "Italian",
+        "lt": "Lithuanian",
+        "nb_NO": "Norwegian Bokmål",
+        "nl": "Dutch",
+        "pl": "Polish",
+        "pt": "Portuguese",
+        "pt_BR": "Portuguese (Brazil)",
+        "ro": "Romanian",
+        "ru": "Russian",
+        "sv": "Swedish",
+        "zh_Hans": "Chinese (Simplified)",
+        "zh_Hant": "Chinese (Traditional)",
     }
     BABEL_DEFAULT_LOCALE = "en"
     BABEL_TRANSLATION_DIRECTORIES = str(BASE_DIR / "app" / "translations")
+    # Allow forcing a specific language via environment variable
+    FORCE_LANGUAGE = os.getenv("FORCE_LANGUAGE")
     # Scheduler
     SCHEDULER_API_ENABLED = True
     # SQLAlchemy
     SQLALCHEMY_DATABASE_URI = f"sqlite:///{DATABASE_DIR / 'database.db'}"
     SQLALCHEMY_TRACK_MODIFICATIONS = False
+    # SQLite engine options for concurrent write support
+    SQLALCHEMY_ENGINE_OPTIONS: ClassVar[dict] = {
+        "connect_args": {
+            "timeout": 30,  # 30 second timeout for lock waits
+            "check_same_thread": False,  # Allow multi-threaded access
+        },
+        "pool_pre_ping": True,  # Verify connections before using
+        "pool_recycle": 3600,  # Recycle connections after 1 hour
+    }
 
 
 class DevelopmentConfig(BaseConfig):

@@ -1,5 +1,6 @@
 from flask_wtf import FlaskForm
-from wtforms import HiddenField, SelectField, StringField, TextAreaField
+from flask_wtf.file import FileAllowed, FileField, FileRequired
+from wtforms import BooleanField, HiddenField, SelectField, StringField, TextAreaField
 from wtforms.validators import DataRequired, Optional
 
 
@@ -18,13 +19,28 @@ class WizardStepForm(FlaskForm):
         validators=[DataRequired()],
     )
 
+    category = SelectField(
+        "Category",
+        choices=[
+            ("pre_invite", "Before Invite Acceptance"),
+            ("post_invite", "After Invite Acceptance"),
+        ],
+        default="post_invite",
+        validators=[DataRequired()],
+    )
+
     position = HiddenField("Position", default="0")
 
     title = StringField("Title", validators=[Optional()])
 
     markdown = TextAreaField("Markdown", validators=[DataRequired()])
 
-    # Removed requires field as part of requires system overhaul
+    # Require explicit user interaction before enabling Next
+    require_interaction = BooleanField(
+        "Require User Interaction",
+        default=False,
+        description="Block the user continuing, until they click a button or link in this step.",
+    )
 
 
 class WizardPresetForm(FlaskForm):
@@ -41,6 +57,16 @@ class WizardPresetForm(FlaskForm):
             ("komga", "Komga"),
             ("kavita", "Kavita"),
         ],
+        validators=[DataRequired()],
+    )
+
+    category = SelectField(
+        "Category",
+        choices=[
+            ("pre_invite", "Before Invite Acceptance"),
+            ("post_invite", "After Invite Acceptance"),
+        ],
+        default="post_invite",
         validators=[DataRequired()],
     )
 
@@ -66,5 +92,40 @@ class WizardBundleForm(FlaskForm):
 class SimpleWizardStepForm(FlaskForm):
     """Minimal form for bundle-only steps (no server_type, no requires)."""
 
+    category = SelectField(
+        "Category",
+        choices=[
+            ("pre_invite", "Before Invite Acceptance"),
+            ("post_invite", "After Invite Acceptance"),
+        ],
+        default="post_invite",
+        validators=[DataRequired()],
+    )
+
     title = StringField("Title", validators=[Optional()])
     markdown = TextAreaField("Markdown", validators=[DataRequired()])
+
+    # Allow interaction requirement for custom/bundle steps as well
+    require_interaction = BooleanField(
+        "Require User Interaction",
+        default=False,
+        description="Block the user continuing, until they click a button or link in this step.",
+    )
+
+
+class WizardImportForm(FlaskForm):
+    """Form for importing wizard steps or bundles from JSON files."""
+
+    file = FileField(
+        "JSON File",
+        validators=[
+            FileRequired("Please select a JSON file to import."),
+            FileAllowed(["json"], "Only JSON files are allowed."),
+        ],
+    )
+
+    replace_existing = BooleanField(
+        "Replace Existing",
+        default=False,
+        description="Check to replace existing data, leave unchecked to merge with existing.",
+    )

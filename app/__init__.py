@@ -19,7 +19,7 @@ def create_app(config_object=DevelopmentConfig):
 
     if show_startup:
         logger.welcome(os.getenv("APP_VERSION", "dev"))
-        logger.start_sequence(total_steps=8)
+        logger.start_sequence(total_steps=10)
 
     # Step 1: Configure logging
     if show_startup:
@@ -45,12 +45,23 @@ def create_app(config_object=DevelopmentConfig):
     for bp in all_blueprints:
         app.register_blueprint(bp)
 
+    # Initialise activity monitoring (blueprint already registered above)
+    from app.activity import init_app as init_activity
+
+    init_activity(app)
+
     # Step 5: Setup context processors and filters
     if show_startup:
         logger.step("Configuring request processing", "⚙️")
-    from .context_processors import inject_server_name
+    from .context_processors import (
+        inject_app_version,
+        inject_plus_features,
+        inject_server_name,
+    )
 
     app.context_processor(inject_server_name)
+    app.context_processor(inject_plus_features)
+    app.context_processor(inject_app_version)
     register_error_handlers(app)
 
     # Register custom Jinja filters
@@ -89,7 +100,63 @@ def create_app(config_object=DevelopmentConfig):
             # Non-fatal – log and continue startup to avoid blocking the app
             logger.warning(f"Wizard step migration failed: {exc}")
 
-    # Step 8: Show scheduler status and complete startup
+        # Step 8: Scan libraries for all media servers
+        # Skip during migrations to avoid database locking issues
+        skip_library_scan = os.getenv("FLASK_SKIP_SCHEDULER") == "true"
+
+        if not skip_library_scan:
+            if show_startup:
+                logger.step("Scanning media server libraries", "📚")
+            try:
+                from .services.library_scanner import scan_all_server_libraries
+
+                total_scanned, _ = scan_all_server_libraries(show_logs=show_startup)
+
+                if show_startup:
+                    if total_scanned > 0:
+                        logger.success(f"Scanned {total_scanned} libraries")
+                    else:
+                        logger.info("No media servers configured")
+            except Exception as exc:
+                # Non-fatal – log and continue startup to avoid blocking the app
+                if show_startup:
+                    logger.warning(f"Library scanning failed: {exc}")
+        elif show_startup:
+            logger.step("Scanning media server libraries", "📚")
+            logger.info("Skipped during migrations")
+
+    # Step 9: Initialize Plus features if enabled
+    if show_startup:
+        logger.step("Checking for Plus features", "⭐")
+
+    # Check if plus features should be enabled
+    plus_enabled = os.getenv("WIZARR_PLUS_ENABLED", "false").lower() in (
+        "true",
+        "1",
+        "yes",
+    )
+
+    if plus_enabled:
+        try:
+            import plus
+
+            plus.enable_plus_features()  # type: ignore
+
+            with app.app_context():
+                plus.initialize_plus_features(app)  # type: ignore
+
+            if show_startup:
+                logger.success("Plus features enabled")
+        except ImportError:
+            if show_startup:
+                logger.warning("Plus features requested but plus module not found")
+        except Exception as exc:
+            if show_startup:
+                logger.warning(f"Plus features initialization failed: {exc}")
+    elif show_startup:
+        logger.info("Plus features disabled")
+
+    # Step 10: Show scheduler status and complete startup
     if show_startup:
         logger.step("Finalizing application setup", "✨")
 

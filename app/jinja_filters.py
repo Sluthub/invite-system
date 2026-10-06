@@ -1,6 +1,17 @@
-from datetime import datetime
+import contextlib
+import logging
+import os
+import time
+from datetime import UTC, datetime
 
 from markupsafe import Markup, escape
+
+try:
+    from zoneinfo import ZoneInfo
+except (
+    ImportError
+):  # pragma: no cover - Python <3.9 not officially supported but handle gracefully
+    ZoneInfo = None  # type: ignore
 
 # Mapping of server types to their desired pastel background colours
 _SERVER_TAG_COLOURS = {
@@ -13,6 +24,40 @@ _SERVER_TAG_COLOURS = {
 }
 
 _DEFAULT_COLOUR = "#E0E0E0"  # neutral grey fallback
+
+
+def _resolve_local_timezone():
+    """Determine the timezone to use for rendering timestamps."""
+    tz_name = os.environ.get("TZ")
+
+    if tz_name and hasattr(time, "tzset"):
+        with contextlib.suppress(Exception):
+            time.tzset()
+
+    if ZoneInfo is not None:
+        # First try explicit TZ environment variable
+        if tz_name:
+            try:
+                return ZoneInfo(tz_name)
+            except Exception as exc:
+                logging.debug(f"Failed to load timezone {tz_name}: {exc}")
+
+        # Fall back to system tzname if available
+        try:
+            local_name = time.tzname[0] if time.tzname else None
+            if local_name:
+                return ZoneInfo(local_name)
+        except Exception as exc:
+            logging.debug(f"Failed to load system timezone {local_name}: {exc}")
+
+    # Fallback: use the system local timezone as determined by datetime
+    try:
+        return datetime.now().astimezone().tzinfo
+    except Exception:
+        return None
+
+
+_LOCAL_TIMEZONE = _resolve_local_timezone()
 
 
 def _server_colour(server_type: str) -> str:
@@ -36,7 +81,7 @@ def server_type_tag(server_type: str) -> Markup:
         f'<span class="text-xs inline-block font-medium px-2 py-0.5 rounded-lg" '
         f'style="background-color: {colour}; color: #000;">{text}</span>'
     )
-    return Markup(html)
+    return Markup(html)  # noqa: S704  # User input is escaped, colour from safe dict
 
 
 def server_name_tag(server_type: str, server_name: str) -> Markup:
@@ -52,15 +97,11 @@ def server_name_tag(server_type: str, server_name: str) -> Markup:
         f'<span class="text-xs inline-block font-medium px-2 py-0.5 rounded-lg" '
         f'style="background-color: {colour}; color: #000;">{text}</span>'
     )
-    return Markup(html)
+    return Markup(html)  # noqa: S704  # User input is escaped, colour from safe dict
 
 
 def human_date(date_value) -> str:
-    """Format a date/datetime to be more human-readable.
-
-    Converts datetime objects or ISO strings to a format like:
-    "Jan 15, 2024 at 2:30 PM"
-    """
+    """Format date to 'Jan 15, 2024 at 2:30 PM'."""
     if not date_value:
         return "—"
 
@@ -75,22 +116,80 @@ def human_date(date_value) -> str:
                 "%Y-%m-%dT%H:%M:%S.%f",
             ]:
                 try:
-                    date_value = datetime.strptime(date_value, fmt)
+                    date_value = datetime.strptime(date_value, fmt).replace(tzinfo=UTC)  # type: ignore
                     break
                 except ValueError:
                     continue
             else:
                 # If we can't parse it, just return the original truncated string
-                return date_value[:16] if len(date_value) > 16 else date_value
+                return date_value[:16] if len(date_value) > 16 else date_value  # type: ignore
         except (ValueError, AttributeError):
-            return date_value[:16] if len(date_value) > 16 else date_value
+            return date_value[:16] if len(date_value) > 16 else date_value  # type: ignore
 
     # Handle datetime objects
     if hasattr(date_value, "strftime"):
-        return date_value.strftime("%b %-d, %Y at %-I:%M %p")
+        return local_date(date_value, "%b %-d, %Y at %-I:%M %p")
 
     # Fallback for unknown types
     return str(date_value)[:16]
+
+
+def local_date(date_value, format_str="%m/%d %H:%M") -> str:
+    """Convert UTC datetime to local timezone."""
+    if not date_value:
+        return "—"
+
+    # Parse string to datetime if needed
+    if isinstance(date_value, str):
+        for fmt in ["%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S.%f", "%Y-%m-%dT%H:%M:%S"]:
+            with contextlib.suppress(ValueError):
+                date_value = datetime.strptime(date_value.rstrip("Z"), fmt).replace(
+                    tzinfo=UTC
+                )
+                break
+        else:
+            return str(date_value)[:16]
+
+    # Format datetime object
+    if hasattr(date_value, "strftime"):
+        if date_value.tzinfo is None:
+            date_value = date_value.replace(tzinfo=UTC)
+
+        local_time = date_value.astimezone(_LOCAL_TIMEZONE or None)
+        if os.name == "nt":
+            format_str = format_str.replace("%-d", "%#d").replace("%-I", "%#I")
+        return local_time.strftime(format_str)
+
+    return str(date_value)
+
+
+def nl2br(text: str) -> Markup:
+    """Convert newlines to HTML <br> tags."""
+    if not text:
+        return Markup("")
+
+    # Escape HTML to prevent XSS, then replace newlines with <br> tags
+    escaped_text = escape(text)
+    html = str(escaped_text).replace("\n", "<br>")
+    return Markup(html)  # noqa: S704  # Text is escaped before markup conversion
+
+
+def render_jinja(text: str) -> Markup:
+    """Render a string as a Jinja template.
+
+    This is useful for rendering template syntax stored in the database,
+    such as wizard step titles that contain {{ _('...') }} translation calls.
+    """
+    if not text:
+        return Markup("")
+
+    from app.services.wizard_templates import render_wizard_template
+
+    try:
+        return escape(render_wizard_template(text))
+    except Exception:
+        # If rendering fails, return the original text escaped
+        return Markup(escape(text))  # noqa: S704  # Text is explicitly escaped
 
 
 def register_filters(app):
@@ -99,3 +198,10 @@ def register_filters(app):
     app.jinja_env.filters.setdefault("server_name_tag", server_name_tag)
     app.jinja_env.filters.setdefault("server_colour", _server_colour)
     app.jinja_env.filters.setdefault("human_date", human_date)
+    app.jinja_env.filters.setdefault("local_date", local_date)
+    app.jinja_env.filters.setdefault("nl2br", nl2br)
+    app.jinja_env.filters.setdefault("render_jinja", render_jinja)
+
+    # Add Python built-in functions to Jinja globals
+    app.jinja_env.globals.setdefault("max", max)
+    app.jinja_env.globals.setdefault("min", min)

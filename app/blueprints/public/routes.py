@@ -1,7 +1,6 @@
-import os
-import urllib.parse
+from pathlib import Path
 
-import requests
+import structlog
 from flask import (
     Blueprint,
     Response,
@@ -14,6 +13,7 @@ from flask import (
     session,
     url_for,
 )
+from flask_babel import gettext as _
 
 from app.extensions import db, limiter
 from app.models import Invitation, MediaServer, Settings, User
@@ -21,6 +21,46 @@ from app.services.invites import is_invite_valid
 from app.services.media.plex import PlexInvitationError, handle_oauth_token
 
 public_bp = Blueprint("public", __name__)
+
+
+def _media_permission_flags(invitation: Invitation, server: MediaServer) -> dict:
+    return {
+        "allow_downloads": bool(getattr(invitation, "allow_downloads", False))
+        or bool(getattr(server, "allow_downloads", False)),
+        "allow_live_tv": bool(getattr(invitation, "allow_live_tv", False))
+        or bool(getattr(server, "allow_live_tv", False)),
+        "allow_mobile_uploads": bool(getattr(invitation, "allow_mobile_uploads", False))
+        or bool(getattr(server, "allow_mobile_uploads", False)),
+    }
+
+
+def _apply_safe_media_user_policy(
+    client, user_id: str, invitation: Invitation, server: MediaServer
+) -> dict:
+    permissions = _media_permission_flags(invitation, server)
+    current_policy = client.get(f"/Users/{user_id}").json().get("Policy", {})
+    current_policy.update(
+        {
+            "IsAdministrator": False,
+            "EnableContentDeletion": False,
+            "EnableContentDeletionFromFolders": [],
+            "EnableContentDownloading": permissions["allow_downloads"],
+            "EnableLiveTvAccess": permissions["allow_live_tv"],
+            "EnableLiveTvManagement": False,
+            "AllowCameraUpload": permissions["allow_mobile_uploads"],
+            "EnablePublicSharing": False,
+            "AllowSharingPersonalItems": False,
+            "EnableSubtitleManagement": False,
+            "EnableRemoteControlOfOtherUsers": False,
+        }
+    )
+
+    max_sessions = getattr(invitation, "max_active_sessions", None)
+    if server.server_type == "jellyfin" and max_sessions is not None:
+        current_policy["MaxActiveSessions"] = max_sessions
+
+    client.set_policy(user_id, current_policy)
+    return permissions
 
 
 # ─── Landing “/” ──────────────────────────────────────────────────────────────
@@ -44,6 +84,12 @@ def favicon():
 
 
 # ─── Invite link  /j/<code> ─────────────────────────────────────────────────
+@public_bp.route("/i/<code>")
+def legacy_invite(code):
+    """Preserve invitation links issued by the older Sluthub interface."""
+    return redirect(url_for("public.invite", code=code))
+
+
 @public_bp.route("/j/<code>")
 @limiter.limit("50 per minute")
 def invite(code):
@@ -124,7 +170,11 @@ def join():
             try:
                 handle_oauth_token(current_app, token, code)
             except PlexInvitationError as e:
-                # Show user-friendly error message from Plex API
+                structlog.get_logger().error(
+                    "Plex invitation failed",
+                    code=code,
+                    error=e.message,
+                )
                 name_setting = Settings.query.filter_by(key="server_name").first()
                 server_name = name_setting.value if name_setting else None
 
@@ -132,14 +182,16 @@ def join():
                     "user-plex-login.html",
                     server_name=server_name,
                     code=code,
-                    code_error=f"Plex invitation failed: {e.message}",
+                    code_error=_(
+                        "There was an issue setting up your access. Please contact your server admin."
+                    ),
                 )
             except Exception as e:
-                # Handle any other unexpected errors
-                import logging
-
-                logging.error(f"Unexpected error during Plex OAuth: {e}")
-
+                structlog.get_logger().error(
+                    "Unexpected error during Plex OAuth",
+                    code=code,
+                    error=str(e),
+                )
                 name_setting = Settings.query.filter_by(key="server_name").first()
                 server_name = name_setting.value if name_setting else None
 
@@ -147,7 +199,9 @@ def join():
                     "user-plex-login.html",
                     server_name=server_name,
                     code=code,
-                    code_error="An unexpected error occurred during invitation. Please try again or contact support.",
+                    code_error=_(
+                        "There was an issue setting up your access. Please contact your server admin."
+                    ),
                 )
 
         # Determine if there are additional servers attached to the invite
@@ -175,6 +229,7 @@ def join():
         "komga",
     ):
         from app.forms.join import JoinForm
+        from app.services.invitation_flow.workflows import _get_server_colors
 
         # Get server name for the invitation using the new resolver if available
         try:
@@ -196,11 +251,15 @@ def join():
 
         form = JoinForm()
         form.code.data = code
+        colors = _get_server_colors(server_type)
         return render_template(
             "welcome-jellyfin.html",
             code=code,
             server_type=server_type,
             server_name=server_name,
+            gradient_start=colors["gradient_start"],
+            gradient_end=colors["gradient_end"],
+            shadow_color=colors["shadow_color"],
             form=form,
         )
 
@@ -270,7 +329,7 @@ def cinema_posters():
 def manifest():
     """Serve the PWA manifest file with correct content type"""
     return send_from_directory(
-        os.path.join(current_app.root_path, "static"),
+        Path(current_app.root_path) / "static",
         "manifest.json",
         mimetype="application/manifest+json",
     )
@@ -315,6 +374,40 @@ def password_prompt(code):
                 secrets.choice(string.ascii_letters + string.digits) for _ in range(16)
             )
 
+        # Determine username and email for all account creations
+        if plex_user:
+            username = plex_user.username
+            email = plex_user.email
+        else:
+            # For non-Plex flows, use form data or generate a unique username
+            import uuid
+
+            username = request.form.get("username") or f"user-{uuid.uuid4().hex[:8]}"
+            email = request.form.get("email") or ""
+
+        # Create LDAP user if configured
+        from app.services.ldap.invitation_ldap import InvitationLDAPHandler
+
+        ldap_handler = InvitationLDAPHandler(invitation)
+        is_ldap_user = False
+
+        if ldap_handler.should_create_ldap_user():
+            ldap_success, ldap_result = ldap_handler.create_ldap_user(
+                username=username,
+                email=email,
+                password=pw,
+            )
+
+            if not ldap_success:
+                return render_template(
+                    "choose-password.html",
+                    code=code,
+                    error=f"Failed to create LDAP user: {ldap_result}",
+                )
+
+            # Mark that this is an LDAP user
+            is_ldap_user = True
+
         # Provision accounts on remaining servers
         from app.services.expiry import calculate_user_expiry
         from app.services.invites import mark_server_used
@@ -328,17 +421,14 @@ def password_prompt(code):
 
             client = get_client_for_media_server(srv)
 
-            username = (
-                plex_user.username
-                if plex_user
-                else (plex_user.email.split("@")[0] if plex_user else "wizarr")
-            )
-            email = plex_user.email if plex_user else "user@example.com"
-
             try:
+                permissions = _media_permission_flags(invitation, srv)
                 if srv.server_type in ("jellyfin", "emby"):
                     uid = client.create_user(username, pw)
-                elif srv.server_type == "audiobookshelf" or srv.server_type == "romm":
+                    permissions = _apply_safe_media_user_policy(
+                        client, uid, invitation, srv
+                    )
+                elif srv.server_type in ("audiobookshelf", "romm"):
                     uid = client.create_user(username, pw, email=email)
                 else:
                     continue  # unknown server type
@@ -356,6 +446,11 @@ def password_prompt(code):
                 new_user.code = code
                 new_user.server_id = srv.id
                 new_user.expires = user_expires  # Set expiry based on invitation duration (server-specific)
+                new_user.is_ldap_user = is_ldap_user
+                new_user.is_admin = False
+                new_user.allow_downloads = permissions["allow_downloads"]
+                new_user.allow_live_tv = permissions["allow_live_tv"]
+                new_user.allow_camera_upload = permissions["allow_mobile_uploads"]
                 db.session.add(new_user)
                 db.session.commit()
 
@@ -374,61 +469,165 @@ def password_prompt(code):
     return render_template("choose-password.html", code=code)
 
 
+def _image_proxy_response(data: bytes, content_type: str) -> Response:
+    """Build a browser-safe, cacheable response for proxied image bytes."""
+    response = Response(data, content_type=content_type)
+    response.headers["Cache-Control"] = "public, max-age=3600"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    return response
+
+
 # ─── Image proxy to allow internal artwork URLs ─────────────────────────────
 @public_bp.route("/image-proxy")
 def image_proxy():
-    raw = request.args.get("url")
-    if not raw:
+    """
+    Secure image proxy using opaque tokens instead of URLs.
+
+    This prevents SSRF attacks by not exposing the underlying URL.
+    Only accepts signed tokens generated by ImageProxyService.
+    """
+    from app.services.image_proxy import ImageProxyService
+
+    token = request.args.get("token")
+    if not token:
         return Response(status=400)
-    url = urllib.parse.unquote_plus(raw)
-    # rudimentary security – allow only http/https
-    if not url.startswith(("http://", "https://")):
-        return Response(status=400)
-
-    # Server-side image cache
-    import hashlib
-    import time
-
-    from flask import current_app
-
-    # Create cache key from URL
-    cache_key = f"img_{hashlib.md5(url.encode()).hexdigest()}"
-    cache_duration = 3600  # 1 hour
-
-    # Check cache first
-    cached_data = current_app.config.get("IMAGE_CACHE", {})
-    cached_entry = cached_data.get(cache_key)
-
-    if cached_entry and (time.time() - cached_entry["timestamp"]) < cache_duration:
-        resp = Response(cached_entry["data"], content_type=cached_entry["content_type"])
-        resp.headers["Cache-Control"] = "public, max-age=3600"
-        return resp
 
     try:
-        r = requests.get(url, timeout=5, stream=True)  # Reduced timeout from 10s to 5s
-        r.raise_for_status()
-        content_type = r.headers.get("Content-Type", "image/jpeg")
-        image_data = r.content
+        # Validate token and resolve the upstream URL. Any misconfiguration (an
+        # unset SECRET_KEY makes _get_secret fail closed) surfaces here as a 502
+        # rather than an uncaught 500.
+        mapping = ImageProxyService.validate_token(token)
+        if not mapping:
+            return Response(status=403)  # Invalid or expired token
 
-        # Cache the image data
-        if "IMAGE_CACHE" not in current_app.config:
-            current_app.config["IMAGE_CACHE"] = {}
-        current_app.config["IMAGE_CACHE"][cache_key] = {
-            "data": image_data,
-            "content_type": content_type,
-            "timestamp": time.time(),
-        }
-
-        # Clean up old cache entries (simple LRU)
-        if len(current_app.config["IMAGE_CACHE"]) > 200:  # Keep max 200 images
-            oldest_key = min(
-                current_app.config["IMAGE_CACHE"].keys(),
-                key=lambda k: current_app.config["IMAGE_CACHE"][k]["timestamp"],
+        # Cache hits still require a currently valid token. In particular, this
+        # keeps cached image bytes from bypassing token expiry or SECRET_KEY
+        # removal/rotation.
+        cached_image = ImageProxyService.get_cached_image(token)
+        if cached_image:
+            return _image_proxy_response(
+                cached_image["data"], cached_image["content_type"]
             )
-            del current_app.config["IMAGE_CACHE"][oldest_key]
 
-        resp = Response(image_data, content_type=content_type)
-        resp.headers["Cache-Control"] = "public, max-age=3600"
-        return resp
+        url = mapping["url"]
+        server_id = mapping.get("server_id")
+
+        # Prepare headers for authenticated requests (cached per server)
+        headers = ImageProxyService.get_server_headers(server_id, url).copy()
+
+        # Fetch the image using a pooled session to reuse TCP/TLS handshakes.
+        # Artwork endpoints return the image directly, so redirects are not
+        # followed: that keeps the authenticated header from being replayed to
+        # another host if an upstream ever returns a 3xx.
+        session = ImageProxyService.get_session(url, server_id)
+        max_bytes = ImageProxyService.IMAGE_PROXY_MAX_BYTES
+        with session.get(
+            url,
+            headers=headers,
+            timeout=(5, 15),
+            allow_redirects=False,
+            stream=True,
+        ) as r:
+            r.raise_for_status()
+
+            # Redirects are intentionally not followed; treat an unfollowed 3xx
+            # as an upstream failure rather than serving its body. Log it so blank
+            # artwork from a redirect-fronted upstream is diagnosable.
+            if r.status_code >= 300:
+                structlog.get_logger().warning(
+                    "image-proxy upstream returned a redirect; not following",
+                    status=r.status_code,
+                )
+                return Response(status=502)
+
+            # Reject early on an honest Content-Length, then enforce a hard byte
+            # cap while streaming so a large or malicious upstream cannot exhaust
+            # memory on this unauthenticated route.
+            declared_length = r.headers.get("Content-Length")
+            if declared_length is not None:
+                try:
+                    if int(declared_length) > max_bytes:
+                        return Response(status=502)
+                except ValueError:
+                    pass  # Unparseable header; the streaming cap below still applies.
+
+            chunks: list[bytes] = []
+            total = 0
+            for chunk in r.iter_content(64 * 1024):
+                total += len(chunk)
+                if total > max_bytes:
+                    return Response(status=502)
+                chunks.append(chunk)
+
+            image_data = b"".join(chunks)
+            content_type = r.headers.get("Content-Type", "image/jpeg")
+
+        # Cache the image
+        ImageProxyService.cache_image(token, image_data, content_type)
+
+        return _image_proxy_response(image_data, content_type)
+
     except Exception:
         return Response(status=502)
+
+
+# ─── Password Reset ──────────────────────────────────────────────────────────
+@public_bp.route("/reset/<code>", methods=["GET", "POST"])
+@limiter.limit("10 per minute")
+def reset_password(code):
+    """Handle password reset via token link."""
+    from app.services.password_reset import get_reset_token, use_reset_token
+
+    # Validate the reset token
+    token, error = get_reset_token(code)
+
+    if not token:
+        return render_template("password-reset-error.html", error=error, code=code)
+
+    # GET request - show the password reset form
+    if request.method == "GET":
+        return render_template(
+            "password-reset-form.html",
+            code=code,
+            username=token.user.username,
+            expires_at=token.expires_at,
+        )
+
+    # POST request - process the password reset
+    new_password = request.form.get("new_password", "").strip()
+    confirm_password = request.form.get("confirm_password", "").strip()
+
+    # Validate passwords match
+    if new_password != confirm_password:
+        return render_template(
+            "password-reset-form.html",
+            code=code,
+            username=token.user.username,
+            expires_at=token.expires_at,
+            error="Passwords do not match",
+        )
+
+    # Validate password length
+    if not (8 <= len(new_password) <= 128):
+        return render_template(
+            "password-reset-form.html",
+            code=code,
+            username=token.user.username,
+            expires_at=token.expires_at,
+            error="Password must be between 8 and 128 characters",
+        )
+
+    # Use the reset token to change the password
+    success, message = use_reset_token(code, new_password)
+
+    if success:
+        return render_template(
+            "password-reset-success.html", username=token.user.username
+        )
+    return render_template(
+        "password-reset-form.html",
+        code=code,
+        username=token.user.username,
+        expires_at=token.expires_at,
+        error=message,
+    )

@@ -1,75 +1,62 @@
 version: 2
 updates:
-- package-ecosystem: npm
-  directories:
-  - /app/static
-  - /apps/wizarr-frontend
-  - /modules/semantic-release-discord
-  - /modules/semantic-release-sentry-releases
-  - /
-  schedule:
-    interval: daily
-    time: "04:00"
-    timezone: Europe/Berlin
-  open-pull-requests-limit: 2
-  rebase-strategy: auto
-  commit-message:
-    prefix: '[chore] deps'
-  cooldown:
-    default-days: 1
-- package-ecosystem: pip
-  directories:
-  - /apps/wizarr-backend
-  schedule:
-    interval: daily
-    time: "04:00"
-    timezone: Europe/Berlin
-  open-pull-requests-limit: 2
-  rebase-strategy: auto
-  commit-message:
-    prefix: '[chore] deps'
-  cooldown:
-    default-days: 1
-- package-ecosystem: uv
-  directories:
-  - /
-  schedule:
-    interval: daily
-    time: "04:00"
-    timezone: Europe/Berlin
-  open-pull-requests-limit: 2
-  rebase-strategy: auto
-  commit-message:
-    prefix: '[chore] deps'
-  cooldown:
-    default-days: 1
-- package-ecosystem: docker
-  directories:
-  - /
-  - /dockerfiles/wizarr
-  - /dockerfiles/wizarr-backend
-  - /dockerfiles/wizarr-ci
-  - /dockerfiles/wizarr-frontend
-  schedule:
-    interval: daily
-    time: "04:00"
-    timezone: Europe/Berlin
-  open-pull-requests-limit: 2
-  rebase-strategy: auto
-  commit-message:
-    prefix: '[chore] deps'
-  cooldown:
-    default-days: 1
-- package-ecosystem: github-actions
-  directories:
-  - /
-  schedule:
-    interval: daily
-    time: "04:00"
-    timezone: Europe/Berlin
-  open-pull-requests-limit: 2
-  rebase-strategy: auto
-  commit-message:
-    prefix: '[chore] deps'
-  cooldown:
-    default-days: 1
+  - package-ecosystem: npm
+    directory: /app/static
+    schedule:
+      interval: daily
+      time: "04:00"
+      timezone: Europe/Berlin
+    open-pull-requests-limit: 2
+    rebase-strategy: auto
+    commit-message:
+      prefix: "[chore] deps"
+    cooldown:
+      default-days: 1
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: daily
+      time: "04:00"
+      timezone: Europe/Berlin
+    open-pull-requests-limit: 2
+    rebase-strategy: auto
+    commit-message:
+      prefix: "[chore] deps"
+    cooldown:
+      default-days: 1
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: daily
+      time: "04:00"
+      timezone: Europe/Berlin
+    open-pull-requests-limit: 2
+    rebase-strategy: auto
+    commit-message:
+      prefix: "[chore] deps"
+    cooldown:
+      default-days: 1
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: daily
+      time: "04:00"
+      timezone: Europe/Berlin
+    open-pull-requests-limit: 2
+    rebase-strategy: auto
+    commit-message:
+      prefix: "[chore] deps"
+    cooldown:
+      default-days: 1
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: daily
+      time: "04:00"
+      timezone: Europe/Berlin
+    open-pull-requests-limit: 2
+    rebase-strategy: auto
+    commit-message:
+      prefix: "[chore] deps"
+    cooldown:
+      default-days: 1

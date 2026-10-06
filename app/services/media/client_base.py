@@ -40,7 +40,7 @@ def register_media_client(name: str):
     """
 
     def decorator(cls):
-        cls._server_type = name  # type: ignore[attr-defined]
+        cls._server_type = name  # type: ignore
         CLIENTS[name] = cls
         return cls
 
@@ -75,7 +75,7 @@ class MediaClient(ABC):
         media_server: MediaServer | None = None,
         *,
         url_key: str = "server_url",
-        token_key: str = "api_key",
+        token_key: str = "api_key",  # noqa: S107  # Parameter name, not actual password
     ) -> None:
         # ------------------------------------------------------------------
         # 1. Direct MediaServer row supplied
@@ -113,16 +113,65 @@ class MediaClient(ABC):
     def _attach_server_row(self, row: MediaServer) -> None:
         """Populate instance attributes from a MediaServer row."""
         self.server_row: MediaServer = row
-        self.server_id: int = row.id  # type: ignore[attr-defined]
-        self.url = row.url  # type: ignore[attr-defined]
-        self.token = row.api_key  # type: ignore[attr-defined]
+        self.server_id: int = row.id  # type: ignore
+        self.url = row.url  # type: ignore
+        self.token = row.api_key  # type: ignore
+
+    def _skip_prune_on_empty_remote(
+        self, remote_is_empty: bool, known_users: list[User]
+    ) -> bool:
+        """Return True when an empty remote user set must NOT prune local users.
+
+        ``list_users`` runs automatically when the Users page loads. A
+        successful fetch that yields no users is far more likely to be a
+        transient upstream condition or an identity/filter mismatch than the
+        admin genuinely removing everyone, so pruning here would silently delete
+        every local user (and cascade to their activity sessions) with no
+        confirmation. When this returns True the caller should return its
+        existing users unchanged; explicit deletion from the UI is unaffected.
+        """
+        if remote_is_empty and known_users:
+            logging.warning(
+                "%s returned no users for server_id=%s but %d are known locally; "
+                "skipping prune to avoid deleting them.",
+                type(self).__name__,
+                getattr(self, "server_id", None),
+                len(known_users),
+            )
+            return True
+        return False
+
+    def generate_image_proxy_url(self, image_url: str) -> str:
+        """
+        Generate a secure proxy URL for an image.
+
+        Args:
+            image_url: The raw image URL from the media server
+
+        Returns:
+            Secure proxy URL with opaque token: /image-proxy?token=xxx
+        """
+        from urllib.parse import quote_plus
+
+        from app.services.image_proxy import ImageProxyService
+
+        # Generate opaque token for this URL
+        token = ImageProxyService.generate_token(image_url, server_id=self.server_id)
+
+        # Return proxy URL with token
+        return f"/image-proxy?token={quote_plus(token)}"
 
     def _create_user_with_identity_linking(self, user_kwargs: dict) -> User:
-        """Create a User record with automatic identity linking for multi-server invitations.
+        """Create a User record with intelligent identity linking based on invitation type.
 
-        This helper ensures that users created from the same invitation code are
-        automatically linked to a shared Identity, even when they don't have valid
-        email addresses that would trigger the normal email-based linking.
+        This helper implements the correct identity linking logic:
+
+        - **Limited invitations**: Always link users with the same code (same person across servers)
+        - **Unlimited invitations**: Only link users with same code AND same email (same person across servers)
+
+        This prevents the bug where different people using the same unlimited invite
+        would get incorrectly linked, while still allowing the same person to be
+        properly linked across multiple servers.
 
         Args:
             user_kwargs: Dictionary of User model attributes
@@ -135,10 +184,23 @@ class MediaClient(ABC):
 
         # Check if this is part of a multi-server invitation
         if code:
-            existing_user = User.query.filter_by(code=code).first()
-            if existing_user and existing_user.identity_id:
-                # Link to existing identity from same invitation
-                user_kwargs["identity_id"] = existing_user.identity_id
+            from app.models import Invitation
+            from app.services.media.service import EMAIL_RE
+
+            invitation = Invitation.query.filter_by(code=code).first()
+
+            if invitation:
+                if not invitation.unlimited:
+                    # LIMITED invites: Always link users with same code (same person across servers)
+                    existing_user = User.query.filter_by(code=code).first()
+                    if existing_user and existing_user.identity_id:
+                        user_kwargs["identity_id"] = existing_user.identity_id
+                # UNLIMITED invites: Only link if same email (same person across servers)
+                # Different emails = different people, should remain separate
+                elif email and EMAIL_RE.fullmatch(email):
+                    existing_user = User.query.filter_by(code=code, email=email).first()
+                    if existing_user and existing_user.identity_id:
+                        user_kwargs["identity_id"] = existing_user.identity_id
 
         # Clean up any expired user records for this email address
         if email:
@@ -154,6 +216,18 @@ class MediaClient(ABC):
     def libraries(self):
         raise NotImplementedError
 
+    def libraries_scan_authoritative(self, scan_result) -> bool:  # noqa: ARG002
+        """Whether `scan_result` (this call's `libraries()` return value) can be
+        trusted to reconcile libraries that are missing from it as removed.
+
+        Default True: most backends are queried directly, so a result either
+        reflects the server's real state or the request raised and never got
+        here. Override this only if a backend's scan source can silently
+        return a partial view of a healthy server without raising - see
+        PlexClient, whose account-level global-id lookup does exactly that.
+        """
+        return True
+
     @abstractmethod
     def create_user(self, *args, **kwargs):
         raise NotImplementedError
@@ -163,8 +237,90 @@ class MediaClient(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def enable_user(self, user_id: str) -> bool:
+        """Enable a user account on the media server.
+
+        Args:
+            user_id: The user's ID on the media server
+
+        Returns:
+            bool: True if the user was successfully enabled, False otherwise
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    def disable_user(self, user_id: str) -> bool:
+        """Disable a user account on the media server.
+
+        Args:
+            user_id: The user's ID on the media serverFailed to disable
+
+        Returns:
+            bool: True if the user was successfully disabled, False otherwise
+        """
+        raise NotImplementedError
+
+    @abstractmethod
     def delete_user(self, *args, **kwargs):
         raise NotImplementedError
+
+    def reset_password(self, user_identifier: str, new_password: str) -> bool:  # noqa: ARG002
+        """Reset a user's password on the media server.
+
+        Default implementation does nothing and returns False. MediaClient
+        subclasses that support password resets should override this method.
+
+        Args:
+            user_identifier: User ID, email, or token depending on server type
+            new_password: The new password to set
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        logging.warning(f"{self.__class__.__name__} does not implement password resets")
+        return False
+
+    def update_user_permissions(
+        self, _user_identifier: str, _permissions: dict[str, bool]
+    ) -> bool:
+        """Update user permissions on the media server.
+
+        Args:
+            _user_identifier: User ID, email, or token depending on server type
+            _permissions: Dict with keys: allow_downloads, allow_live_tv, allow_camera_upload
+
+        Returns:
+            bool: True if successful, False otherwise
+
+        Note:
+            Default implementation returns False. Media servers that support
+            permission updates should override this method.
+        """
+        logging.warning(
+            f"{self.__class__.__name__} does not support permission updates"
+        )
+        return False
+
+    def update_user_libraries(
+        self, _user_identifier: str, _library_names: list[str] | None
+    ) -> bool:
+        """Update user's library access on the media server.
+
+        Args:
+            _user_identifier: User ID, email, or token depending on server type
+            _library_names: List of library names to grant access to, or None for all libraries
+
+        Returns:
+            bool: True if successful, False otherwise
+
+        Note:
+            Default implementation returns False. Media servers that support
+            library access updates should override this method.
+        """
+        logging.warning(
+            f"{self.__class__.__name__} does not support library access updates"
+        )
+        return False
 
     @abstractmethod
     def get_user(self, *args, **kwargs):
@@ -192,8 +348,69 @@ class MediaClient(ABC):
             user_id=str(user_identifier),
             username=raw_details.get("username", "Unknown"),
             email=raw_details.get("email"),
-            raw_policies=raw_details,
         )
+
+    def _cache_user_metadata_batch(self, users: list[User]) -> None:
+        """Cache metadata for a batch of users to improve performance.
+
+        This method fetches detailed metadata for each user and caches it in the database
+        to avoid repeated API calls when viewing user details.
+
+        Args:
+            users: List of User objects to cache metadata for
+        """
+        if not users:
+            return
+
+        cached_count = 0
+        for user in users:
+            try:
+                # Determine the appropriate user identifier for this server type
+                user_identifier = self._get_user_identifier_for_details(user)
+                if not user_identifier:
+                    continue
+
+                # Get detailed metadata from the server
+                details = self.get_user_details(user_identifier)
+
+                # Update the standardized metadata columns in the User record
+                user.update_standardized_metadata(details)
+                cached_count += 1
+
+            except Exception as e:
+                import logging
+
+                logging.warning(
+                    f"Failed to cache metadata for user {user.username}: {e}"
+                )
+                continue
+
+        if cached_count > 0:
+            try:
+                db.session.commit()
+                import logging
+
+                logging.info(f"Cached metadata for {cached_count} users")
+            except Exception as e:
+                import logging
+
+                logging.error(f"Failed to commit metadata cache: {e}")
+                db.session.rollback()
+
+    def _get_user_identifier_for_details(self, user: User) -> str | int | None:
+        """Get the appropriate identifier to use for get_user_details() calls.
+
+        Different server types use different identifiers (token, email, username).
+        Subclasses should override this method to return the correct identifier.
+
+        Args:
+            user: User record
+
+        Returns:
+            Identifier to use for get_user_details(), or None if unavailable
+        """
+        # Default implementation uses token (works for most servers)
+        return user.token if user.token else None
 
     @abstractmethod
     def list_users(self, *args, **kwargs):
@@ -215,9 +432,35 @@ class MediaClient(ABC):
         """
         raise NotImplementedError
 
+    def get_recent_items(
+        self,
+        library_id: str | None = None,  # noqa: ARG002
+        limit: int = 10,  # noqa: ARG002
+    ) -> list[dict]:
+        """Get recently added items from the media server.
+
+        Args:
+            library_id: Optional library ID to filter by
+            limit: Maximum number of items to return
+
+        Returns:
+            list: A list of recently added items with standardized keys:
+                - title: Title of the media item
+                - year: Release year (if available)
+                - thumb: Thumbnail URL (if available)
+                - type: Media type (movie, episode, track, etc.)
+                - added_at: Unix timestamp when item was added
+        """
+        # Default implementation returns empty list
+        # Subclasses should override this method
+        return []
+
     @abstractmethod
     def statistics(self):
-        """Return server statistics including library counts, user activity, etc.
+        """Return comprehensive server statistics including library counts, user activity, etc.
+
+        Note: This method may trigger user synchronization and database writes.
+        For health monitoring without database impact, use get_readonly_statistics() instead.
 
         Returns:
             dict: A dictionary containing:
@@ -228,7 +471,78 @@ class MediaClient(ABC):
         """
         raise NotImplementedError
 
-    def join(self, username: str, password: str, confirm: str, email: str, code: str):
+    def get_user_count(self) -> int:
+        """Get lightweight user count without triggering full user sync.
+
+        This method should provide a fast user count for health monitoring
+        without the overhead of syncing user policies or metadata.
+
+        Returns:
+            int: Number of users on the server
+        """
+        # Default implementation uses existing statistics() but subclasses should override
+        try:
+            stats = self.statistics()
+            return stats.get("user_stats", {}).get("total_users", 0)
+        except Exception:
+            return 0
+
+    def get_server_info(self) -> dict:
+        """Get lightweight server information without triggering user sync.
+
+        This method should provide basic server health info for monitoring
+        without the overhead of full user synchronization.
+
+        Returns:
+            dict: Basic server information (version, status, etc.)
+        """
+        # Default implementation uses existing statistics() but subclasses should override
+        try:
+            stats = self.statistics()
+            return {
+                "version": stats.get("server_stats", {}).get("version", "Unknown"),
+                "transcoding_sessions": stats.get("server_stats", {}).get(
+                    "transcoding_sessions", 0
+                ),
+                "active_sessions": stats.get("user_stats", {}).get(
+                    "active_sessions", 0
+                ),
+            }
+        except Exception:
+            return {
+                "version": "Unknown",
+                "transcoding_sessions": 0,
+                "active_sessions": 0,
+            }
+
+    def get_readonly_statistics(self) -> dict:
+        """Get lightweight statistics for health monitoring without database writes.
+
+        This method provides essential server statistics for health cards
+        without triggering heavy user synchronization that can cause database locks.
+        Subclasses should override this to provide efficient readonly access.
+
+        Returns:
+            dict: Lightweight statistics with user count and server info
+        """
+        return {
+            "user_stats": {
+                "total_users": self.get_user_count(),
+                "active_sessions": 0,  # Will be populated by subclass overrides
+            },
+            "server_stats": self.get_server_info(),
+            "library_stats": {},  # Minimal for health cards
+            "content_stats": {},  # Minimal for health cards
+        }
+
+    def join(
+        self,
+        username: str,
+        password: str,
+        confirm: str,
+        email: str,
+        code: str,
+    ):
         """Process user invitation for this media server.
 
         This is a template method that handles notifications after successful user creation.
@@ -254,6 +568,7 @@ class MediaClient(ABC):
                     "New User",
                     f"User {username} has joined your server! 🎉",
                     tags="tada",
+                    event_type="user_joined",
                 )
             except Exception as e:
                 logging.warning(f"Failed to send join notification: {e}")
@@ -262,7 +577,12 @@ class MediaClient(ABC):
 
     @abstractmethod
     def _do_join(
-        self, username: str, password: str, confirm: str, email: str, code: str
+        self,
+        username: str,
+        password: str,
+        confirm: str,
+        email: str,
+        code: str,
     ):
         """Process user invitation for this media server (implementation method).
 
@@ -339,7 +659,7 @@ class RestApiMixin(MediaClient):
     # Customisation hooks
     # ------------------------------------------------------------------
 
-    def _headers(self) -> dict[str, str]:  # noqa: D401
+    def _headers(self) -> dict[str, str]:
         """Return default headers for every request (override as needed)."""
         return {
             "Accept": "application/json",
@@ -360,7 +680,7 @@ class RestApiMixin(MediaClient):
         logging.info("%s %s", method.upper(), url)
         try:
             response = requests.request(
-                method, url, headers=headers, timeout=10, **kwargs
+                method, url, headers=headers, timeout=60, **kwargs
             )
             logging.info("→ %s", response.status_code)
             response.raise_for_status()

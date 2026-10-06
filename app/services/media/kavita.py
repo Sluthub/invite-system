@@ -1,4 +1,3 @@
-import datetime
 import hashlib
 import logging
 import re
@@ -6,6 +5,7 @@ import time
 from typing import TYPE_CHECKING
 from urllib.parse import parse_qs, urlparse
 
+import structlog
 from sqlalchemy import or_
 
 from app.extensions import db
@@ -13,6 +13,12 @@ from app.models import Invitation, User
 from app.services.invites import is_invite_valid
 
 from .client_base import RestApiMixin, register_media_client
+from .utils import (
+    DateHelper,
+    LibraryAccessHelper,
+    StandardizedPermissions,
+    create_standardized_user_details,
+)
 
 if TYPE_CHECKING:
     from app.services.media.user_details import MediaUserDetails
@@ -25,17 +31,54 @@ _JWT_TOKEN_CACHE = {}
 
 @register_media_client("kavita")
 class KavitaClient(RestApiMixin):
-    """Wrapper around the Kavita REST API for manga/comic management."""
+    """Wrapper around the Kavita REST API for manga/comic management.
+
+    This client integrates with Kavita v0.8.8.3+ using its official REST API.
+    Authentication is handled via API keys which are exchanged for JWT tokens.
+
+    API Documentation:
+        Base URL: {protocol}://{host:port}
+        OpenAPI Spec: https://github.com/Kareadita/Kavita/blob/develop/openapi.json
+        Auth: JWT Bearer tokens (obtained via /api/Plugin/authenticate)
+
+    Key Endpoints Used:
+        Authentication:
+            - POST /api/Plugin/authenticate - Exchange API key for JWT token
+
+        User Management:
+            - GET  /api/Users - List all users
+            - POST /api/Account/invite - Send user invitation
+            - POST /api/Account/confirm-email - Confirm email and set password
+            - POST /api/Account/update - Update user details (username, email, roles, libraries)
+            - DELETE /api/Users/delete-user?username={username} - Delete user by username
+
+        Library Management:
+            - GET  /api/Library/libraries - List all libraries
+            - POST /api/Library/grant-access - Grant user access to library
+
+        Content:
+            - POST /api/Series - Get series with filter (paginated, requires FilterDto)
+
+        Server Info:
+            - GET /api/Server/server-info-slim - Get server version and basic info
+            - GET /api/Health - Health check endpoint
+
+    Important Notes:
+        - User creation uses invite-based flow (invite -> confirm-email)
+        - User deletion requires username, not user ID
+        - Disabling users is done by removing all library access
+        - JWT tokens are cached for 1 hour to reduce authentication calls
+        - Series listing requires POST with FilterDto (even for basic queries)
+    """
 
     def __init__(self, *args, **kwargs):
         # Ensure default url/token keys if caller didn't override.
         if "url_key" not in kwargs:
             kwargs["url_key"] = "server_url"
         if "token_key" not in kwargs:
-            kwargs["token_key"] = "api_key"
+            kwargs["token_key"] = "api_key"  # noqa: S105  # Parameter name, not actual password
 
         super().__init__(*args, **kwargs)
-        # Create a unique cache key for this server instance
         self._cache_key = self._generate_cache_key()
 
     def _generate_cache_key(self) -> str:
@@ -43,9 +86,8 @@ class KavitaClient(RestApiMixin):
         if not self.url or not self.token:
             return ""
 
-        # Create a hash of the URL and API key for the cache key
         cache_string = f"{self.url}:{self.token}"
-        return hashlib.md5(cache_string.encode()).hexdigest()
+        return hashlib.md5(cache_string.encode()).hexdigest()  # noqa: S324
 
     def _get_cached_token(self) -> str | None:
         """Get cached JWT token if it's still valid."""
@@ -60,7 +102,6 @@ class KavitaClient(RestApiMixin):
 
         # Check if token has expired (with 30 second buffer)
         if time.time() >= expiry_time - 30:
-            # Token expired, remove from cache
             _JWT_TOKEN_CACHE.pop(self._cache_key, None)
             return None
 
@@ -80,10 +121,7 @@ class KavitaClient(RestApiMixin):
     def _headers(self) -> dict[str, str]:
         headers = {"Content-Type": "application/json"}
 
-        # Try to get cached token first
         jwt_token = self._get_cached_token()
-
-        # If no valid cached token, authenticate to get a new one
         if not jwt_token:
             jwt_token = self._authenticate_with_api_key()
 
@@ -112,11 +150,9 @@ class KavitaClient(RestApiMixin):
 
             data = response.json()
 
-            # The response should contain the JWT token
             jwt_token = data.get("token", "")
             if jwt_token:
                 logging.info("Successfully authenticated with Kavita API")
-                # Cache the token for 1 hour (JWT tokens typically expire after some time)
                 self._cache_token(jwt_token, expires_in=3600)
                 return jwt_token
             logging.error("No JWT token returned from Kavita authentication")
@@ -127,9 +163,16 @@ class KavitaClient(RestApiMixin):
             return ""
 
     def libraries(self) -> dict[str, str]:
-        """Get all libraries from Kavita."""
+        """Get all libraries from Kavita.
+
+        API Endpoint: GET /api/Library/libraries
+
+        Returns:
+            dict[str, str]: Mapping of library ID to library name
+        """
         try:
             response = self.get("/api/Library/libraries")
+            response.raise_for_status()
             libraries = response.json()
             return {str(lib["id"]): lib["name"] for lib in libraries}
         except Exception as e:
@@ -151,7 +194,6 @@ class KavitaClient(RestApiMixin):
         import requests
 
         if url and token:
-            # Use override credentials for scanning - need to authenticate first
             try:
                 auth_url = f"{url.rstrip('/')}/api/Plugin/authenticate"
                 params = {"apiKey": token, "pluginName": "Wizarr"}
@@ -164,7 +206,6 @@ class KavitaClient(RestApiMixin):
                 auth_response.raise_for_status()
                 jwt_token = auth_response.json().get("token", "")
 
-                # Use JWT to get libraries
                 headers = {
                     "Authorization": f"Bearer {jwt_token}",
                     "Content-Type": "application/json",
@@ -210,7 +251,6 @@ class KavitaClient(RestApiMixin):
         user_email = email or f"{username}@wizarr.local"
 
         try:
-            # Step 1: Send invitation
             logging.info(f"Sending invite to {user_email} on Kavita")
 
             # Convert library IDs to integers for Kavita API
@@ -242,18 +282,15 @@ class KavitaClient(RestApiMixin):
 
             invite_info = invite_response.json()
 
-            # Extract the token from the emailLink, handling possible extra arguments after the token
+            # Parse token from emailLink (may be in query or fragment depending on Kavita version)
             email_link = invite_info.get("emailLink", "")
             if not email_link:
                 raise Exception("No emailLink found in Kavita invite response")
 
-            # Defensive: parse token from emailLink (may be in query or fragment)
             invite_token = None
             parsed = urlparse(email_link)
-            # Try query first
             params = parse_qs(parsed.query)
             invite_token = params.get("token", [None])[0]
-            # If not found, try fragment (some Kavita versions use #token=...)
             if not invite_token and parsed.fragment:
                 frag_params = parse_qs(parsed.fragment)
                 invite_token = frag_params.get("token", [None])[0]
@@ -264,7 +301,6 @@ class KavitaClient(RestApiMixin):
                 )
                 raise Exception("No invitation token found in response")
 
-            # Step 3: Confirm email with username and password
             logging.info(f"Confirming email for user {username}")
             confirm_data = {
                 "token": invite_token,
@@ -281,7 +317,6 @@ class KavitaClient(RestApiMixin):
                     f"Email confirmation failed: {confirm_response.status_code} - {confirm_response.text}"
                 )
 
-            # Step 4: Get user ID
             users_response = self.get("/api/Users")
 
             if users_response.status_code != 200:
@@ -328,9 +363,15 @@ class KavitaClient(RestApiMixin):
            corresponding username via `GET /api/Users`.
 
         Once we have the username we forward the request to Kavita.
+
+        API Endpoints used:
+        - GET /api/Users - Get all users (if resolving ID to username)
+        - DELETE /api/Users/delete-user?username={username} - Delete user by username
+
+        Args:
+            user_identifier: Either a username (string) or user ID (numeric string)
         """
 
-        # Fast-path: already a username
         if not user_identifier.isdigit():
             username = user_identifier
         else:
@@ -347,7 +388,7 @@ class KavitaClient(RestApiMixin):
                         "Could not map Kavita user-id %s to username – aborting deletion",
                         user_identifier,
                     )
-                    return  # Gracefully exit – nothing to delete
+                    return
             except Exception as exc:
                 logging.error(
                     "Failed to resolve Kavita user-id %s → username: %s",
@@ -356,7 +397,6 @@ class KavitaClient(RestApiMixin):
                 )
                 return
 
-        # Issue the deletion request
         try:
             self.delete(f"/api/Users/delete-user?username={username}")
             logging.info("Deleted Kavita user '%s'", username)
@@ -384,11 +424,9 @@ class KavitaClient(RestApiMixin):
         except ValueError:
             return None
 
-    def get_user_details(self, username: str) -> "MediaUserDetails":
+    def get_user_details(self, user_identifier: str | int) -> "MediaUserDetails":
         """Get detailed user information in standardized format."""
-        from app.services.media.user_details import MediaUserDetails
-
-        # Get raw user data from Kavita API
+        username = str(user_identifier)
         try:
             all_users = self.get("/api/Users").json()
         except Exception as exc:
@@ -412,64 +450,184 @@ class KavitaClient(RestApiMixin):
         if not raw_user:
             raise ValueError(f"Kavita user not found: {username}")
 
-        # Get all available libraries for this server since Kavita gives full access
-        from app.models import Library
-        from app.services.media.user_details import UserLibraryAccess
-
-        libs_q = (
-            Library.query.filter_by(server_id=self.server_id, enabled=True)
-            .order_by(Library.name)
-            .all()
+        permissions = StandardizedPermissions.for_basic_server(
+            server_type="kavita",
+            is_admin=raw_user.get("isAdmin", False),
+            allow_downloads=True,
         )
-        library_access = [
-            UserLibraryAccess(
-                library_id=lib.external_id, library_name=lib.name, has_access=True
-            )
-            for lib in libs_q
-        ]
 
-        return MediaUserDetails(
+        library_access = LibraryAccessHelper.create_full_access()
+        created_at = DateHelper.parse_iso_date(raw_user.get("created"))
+        last_active = DateHelper.parse_iso_date(raw_user.get("lastActive"))
+
+        return create_standardized_user_details(
             user_id=str(raw_user.get("id", username)),
             username=raw_user.get("username", username),
             email=raw_user.get("email"),
-            is_admin=raw_user.get("isAdmin", False),
-            is_enabled=True,  # Kavita doesn't seem to have disabled users concept
-            created_at=datetime.datetime.fromisoformat(raw_user["created"].rstrip("Z"))
-            if raw_user.get("created")
-            else None,
-            last_active=datetime.datetime.fromisoformat(
-                raw_user["lastActive"].rstrip("Z")
-            )
-            if raw_user.get("lastActive")
-            else None,
+            permissions=permissions,
             library_access=library_access,
-            raw_policies=raw_user,
+            created_at=created_at,
+            last_active=last_active,
+            is_enabled=True,
         )
 
     def update_user(self, username: str, form: dict) -> dict | None:
-        """Update user *username* in Kavita."""
+        """Update user in Kavita.
+
+        API Endpoints used:
+        - GET /api/Users - Get all users to find the target user
+        - POST /api/Account/update - Update user with UpdateUserDto
+
+        Args:
+            username: Username of the user to update
+            form: Dictionary of fields to update (must match UpdateUserDto schema)
+
+        Returns:
+            dict | None: Updated user data or None if failed
+        """
         try:
-            current = self.get_user(username)
+            response = self.get("/api/Users")
+            response.raise_for_status()
+            users = response.json()
 
-            # Update fields that exist in form
-            for key, val in form.items():
-                if current and key in current:
-                    current[key] = val
+            if not isinstance(users, list):
+                logging.error("Unexpected response format from /api/Users")
+                return None
 
-            response = self.post("/api/Account/update", json=current)
-            return response.json()
+            target_user = None
+            for user in users:
+                if user.get("username") == username:
+                    target_user = user
+                    break
+
+            if not target_user:
+                logging.warning(f"User {username} not found in Kavita")
+                return None
+
+            update_dto = {
+                "userId": target_user.get("id"),
+                "username": form.get("username", target_user.get("username")),
+                "email": form.get("email", target_user.get("email")),
+                "roles": form.get("roles", target_user.get("roles", [])),
+                "libraries": form.get("libraries", []),
+                "ageRestriction": form.get(
+                    "ageRestriction",
+                    target_user.get(
+                        "ageRestriction", {"ageRating": 0, "includeUnknowns": True}
+                    ),
+                ),
+                "identityProvider": form.get(
+                    "identityProvider", target_user.get("identityProvider", 0)
+                ),
+            }
+
+            response = self.post("/api/Account/update", json=update_dto)
+            response.raise_for_status()
+
+            return {
+                "id": update_dto["userId"],
+                "username": update_dto["username"],
+                "email": update_dto["email"],
+                "roles": update_dto["roles"],
+                "libraries": update_dto["libraries"],
+            }
+
         except Exception as e:
             logging.error(f"Failed to update Kavita user {username}: {e}")
             return None
 
+    def enable_user(self, user_id: str) -> bool:  # noqa: ARG002
+        """Enable a user account on Kavita.
+
+        Args:
+            user_id: The user's Kavita ID (unused - Kavita doesn't support enable/disable)
+
+        Returns:
+            bool: Always False - Kavita doesn't support this operation
+        """
+        structlog.get_logger().warning(
+            "Kavita does not support enabling users. They need to be given library access."
+        )
+        return False
+
+    def disable_user(self, user_id: str) -> bool:
+        """Disable a user account on Kavita by removing all library access.
+
+        Kavita doesn't have a direct "disable" feature, so we remove all library
+        access to effectively disable the user.
+
+        API Endpoints used:
+        - GET /api/Users: Get all users to find the target user
+        - POST /api/Account/update: Update user with empty libraries array
+
+        Args:
+            user_id: The user's Kavita ID
+
+        Returns:
+            bool: True if the user was successfully disabled, False otherwise
+        """
+        try:
+            response = self.get("/api/Users")
+            response.raise_for_status()
+            users = response.json()
+
+            if not isinstance(users, list):
+                structlog.get_logger().error(
+                    "Unexpected response format from /api/Users"
+                )
+                return False
+
+            target_user = None
+            for user in users:
+                if str(user.get("id")) == str(user_id):
+                    target_user = user
+                    break
+
+            if not target_user:
+                structlog.get_logger().warning(f"User {user_id} not found in Kavita")
+                return False
+
+            update_dto = {
+                "userId": int(user_id),
+                "username": target_user.get("username"),
+                "email": target_user.get("email"),
+                "roles": target_user.get("roles", []),
+                "libraries": [],
+                "ageRestriction": target_user.get(
+                    "ageRestriction", {"ageRating": 0, "includeUnknowns": True}
+                ),
+                "identityProvider": target_user.get("identityProvider", 0),
+            }
+
+            response = self.post("/api/Account/update", json=update_dto)
+            response.raise_for_status()
+
+            structlog.get_logger().info(
+                f"Disabled Kavita user {user_id} by removing library access"
+            )
+            return True
+
+        except Exception as e:
+            structlog.get_logger().error(f"Failed to disable Kavita user: {e}")
+            return False
+
     def grant_library_access(self, user_id: str, library_ids: list[str]) -> None:
-        """Grant user access to specific libraries."""
+        """Grant user access to specific libraries.
+
+        API Endpoint: POST /api/Library/grant-access
+        Request Body: {"userId": int, "libraryId": int}
+
+        Args:
+            user_id: The user's Kavita ID (numeric)
+            library_ids: List of library IDs to grant access to
+        """
         for library_id in library_ids:
             try:
-                self.post(
+                response = self.post(
                     "/api/Library/grant-access",
                     json={"userId": int(user_id), "libraryId": int(library_id)},
                 )
+                response.raise_for_status()
             except Exception as e:
                 logging.error(
                     f"Failed to grant library {library_id} access to user {user_id}: {e}"
@@ -478,10 +636,9 @@ class KavitaClient(RestApiMixin):
     def list_users(self) -> list[User]:
         """Sync users from Kavita into the local DB and return the list of User records."""
         try:
-            # Fetch users from Kavita
             response = self.get("/api/Users")
 
-            # Kavita sometimes returns a 200 with an empty body when the JWT is expired
+            # Kavita sometimes returns empty body when JWT is expired
             if not response.text or not response.text.strip():
                 logging.warning(
                     "Kavita /api/User returned an empty response – skipping user sync"
@@ -502,6 +659,12 @@ class KavitaClient(RestApiMixin):
 
             users_dict = {str(u["id"]): u for u in kavita_users}
 
+            known_users = User.query.filter(
+                User.server_id == getattr(self, "server_id", None)
+            ).all()
+            if self._skip_prune_on_empty_remote(not users_dict, known_users):
+                return known_users
+
             for kavita_user in users_dict.values():
                 existing = User.query.filter_by(token=str(kavita_user["id"])).first()
                 if not existing:
@@ -516,7 +679,7 @@ class KavitaClient(RestApiMixin):
                     db.session.add(new)
             db.session.commit()
 
-            # delete local users for this server that no longer exist upstream
+            # Delete local users that no longer exist upstream
             to_check = User.query.filter(
                 User.server_id == getattr(self, "server_id", None)
             ).all()
@@ -525,16 +688,26 @@ class KavitaClient(RestApiMixin):
                     db.session.delete(dbu)
             db.session.commit()
 
-            # Get users with default policy information
             users = User.query.filter(
                 User.server_id == getattr(self, "server_id", None)
             ).all()
 
-            # Add default policy attributes (Kavita doesn't have specific download/live TV policies)
             for user in users:
-                user.allow_downloads = True  # Default to True for reading apps
-                user.allow_live_tv = False  # Kavita doesn't have Live TV
-                user.allow_sync = True  # Default to True for reading apps
+                permissions = StandardizedPermissions.for_basic_server(
+                    server_type="kavita",
+                    is_admin=False,
+                    allow_downloads=True,
+                )
+                user.allow_downloads = permissions.allow_downloads
+                user.allow_live_tv = permissions.allow_live_tv
+                user.is_admin = permissions.is_admin
+
+            try:
+                db.session.commit()
+            except Exception as e:
+                logging.error("Kavita: failed to update user metadata – %s", e)
+                db.session.rollback()
+                return []
 
             return users
         except Exception as e:
@@ -550,7 +723,12 @@ class KavitaClient(RestApiMixin):
     # --- public sign-up ---------------------------------------------
 
     def _do_join(
-        self, username: str, password: str, confirm: str, email: str, code: str
+        self,
+        username: str,
+        password: str,
+        confirm: str,
+        email: str,
+        code: str,
     ) -> tuple[bool, str]:
         if email and not EMAIL_RE.fullmatch(email):
             return False, "Invalid e-mail address."
@@ -574,7 +752,6 @@ class KavitaClient(RestApiMixin):
             inv = Invitation.query.filter_by(code=code).first()
             current_server_id = getattr(self, "server_id", None)
 
-            # Get library IDs for this server from the invitation
             library_ids = []
             if inv and inv.libraries:
                 library_ids = [
@@ -583,20 +760,17 @@ class KavitaClient(RestApiMixin):
                     if lib.server_id == current_server_id
                 ]
 
-            # Create user in Kavita with library access
             user_identifier = self.create_user(username, password, email, library_ids)
 
             from app.services.expiry import calculate_user_expiry
 
             expires = calculate_user_expiry(inv, current_server_id) if inv else None
 
-            # Store the user info in Wizarr's database
-            # The token field contains either the user ID or email as fallback
             self._create_user_with_identity_linking(
                 {
                     "username": username,
                     "email": email or "empty",
-                    "token": user_identifier,  # User ID if successful, email as fallback
+                    "token": user_identifier,
                     "code": code,
                     "expires": expires,
                     "server_id": current_server_id,
@@ -604,17 +778,15 @@ class KavitaClient(RestApiMixin):
             )
             db.session.commit()
 
-            # Try to grant library access as fallback (in case invite didn't include libraries)
+            # Grant library access if user creation returned email fallback
             if library_ids:
                 try:
                     if user_identifier.isdigit():
-                        # We have a numeric user ID, use it directly
                         self.grant_library_access(user_identifier, library_ids)
                         logging.info(
                             f"Granted library access to Kavita user {username} (ID: {user_identifier}): {library_ids}"
                         )
                     else:
-                        # We have email identifier, try to find the actual user ID
                         logging.info(
                             f"Attempting to grant library access using email identifier: {user_identifier}"
                         )
@@ -673,8 +845,18 @@ class KavitaClient(RestApiMixin):
     def statistics(self):
         """Return Kavita server statistics for the dashboard.
 
+        API Endpoints used:
+        - GET /api/Server/server-info-slim: Server version and info
+        - GET /api/Users: List of all users
+        - GET /api/Library/libraries: List of all libraries
+        - POST /api/Series: Paginated series list (requires FilterDto in body)
+
         Returns:
-            dict: Server statistics
+            dict: Server statistics with keys:
+                - library_stats: Library count information
+                - user_stats: User count and session information
+                - server_stats: Version and transcoding information
+                - content_stats: Series count information
         """
         try:
             stats = {
@@ -684,22 +866,14 @@ class KavitaClient(RestApiMixin):
                 "content_stats": {},
             }
 
-            # Get server info - try different endpoints as /api/Server/server-info might not exist
             try:
-                # Try the system info endpoint instead
-                response = self.get("/api/System/info")
-                if response.text.strip():  # Check if response has content
-                    server_info = response.json()
-                    stats["server_stats"] = {
-                        "version": server_info.get("kavitaVersion", "Unknown"),
-                        "transcoding_sessions": 0,  # Not applicable for Kavita
-                    }
-                else:
-                    # Fallback: just set a default version
-                    stats["server_stats"] = {
-                        "version": "0.8.x",
-                        "transcoding_sessions": 0,
-                    }
+                response = self.get("/api/Server/server-info-slim")
+                response.raise_for_status()
+                server_info = response.json()
+                stats["server_stats"] = {
+                    "version": server_info.get("kavitaVersion", "Unknown"),
+                    "transcoding_sessions": 0,
+                }
             except Exception as e:
                 logging.error(f"Failed to get Kavita server info: {e}")
                 stats["server_stats"] = {
@@ -707,47 +881,66 @@ class KavitaClient(RestApiMixin):
                     "transcoding_sessions": 0,
                 }
 
-            # Get user count
             try:
                 response = self.get("/api/Users")
-                if response.text.strip():  # Check if response has content
-                    users = response.json()
-                    user_count = len(users) if isinstance(users, list) else 0
-                else:
-                    user_count = 0
+                response.raise_for_status()
+                users = response.json()
+                user_count = len(users) if isinstance(users, list) else 0
 
                 stats["user_stats"] = {
                     "total_users": user_count,
-                    "active_sessions": 0,  # Kavita doesn't track active sessions
+                    "active_sessions": 0,
                 }
             except Exception as e:
                 logging.error(f"Failed to get Kavita user stats: {e}")
                 stats["user_stats"] = {"total_users": 0, "active_sessions": 0}
 
-            # Get library stats
             try:
                 response = self.get("/api/Library/libraries")
-                if response.text.strip():  # Check if response has content
-                    libraries = response.json()
-                    if isinstance(libraries, list):
-                        stats["library_stats"] = {"total_libraries": len(libraries)}
+                response.raise_for_status()
+                libraries = response.json()
 
-                        # Get series count - use a simpler approach
+                if isinstance(libraries, list):
+                    stats["library_stats"] = {"total_libraries": len(libraries)}
+
+                    # Get series count using POST with minimal FilterDto
+                    # Note: /api/Series is v1 (deprecated but still supported)
+                    # It returns a paginated response
+                    total_series = 0
+                    try:
+                        # POST with empty filter to get all series (just first page for count)
+                        filter_dto = {
+                            "libraries": [],  # Empty = all libraries
+                            "formats": [],  # Empty = all formats
+                            "genres": [],
+                            "writers": [],
+                            "penciller": [],
+                            "inker": [],
+                            "colorist": [],
+                            "letterer": [],
+                            "coverArtist": [],
+                            "editor": [],
+                            "publisher": [],
+                            "character": [],
+                            "translators": [],
+                            "collectionTags": [],
+                            "tags": [],
+                            "ageRating": [],
+                            "languages": [],
+                            "publicationStatus": [],
+                            "seriesNameQuery": "",
+                        }
+                        series_response = self.post("/api/Series", json=filter_dto)
+                        series_response.raise_for_status()
+                        series_data = series_response.json()
+
+                        # The response should have totalCount field in pagination
+                        total_series = series_data.get("totalCount", len(series_data))
+                    except Exception as series_error:
+                        logging.warning(f"Failed to get series count: {series_error}")
                         total_series = 0
-                        try:
-                            series_response = self.get(
-                                "/api/Series", params={"pageSize": 1}
-                            )
-                            if series_response.text.strip():
-                                series_data = series_response.json()
-                                total_series = series_data.get("totalCount", 0)
-                        except Exception:
-                            total_series = 0
 
-                        stats["content_stats"] = {"total_series": total_series}
-                    else:
-                        stats["library_stats"] = {"total_libraries": 0}
-                        stats["content_stats"] = {"total_series": 0}
+                    stats["content_stats"] = {"total_series": total_series}
                 else:
                     stats["library_stats"] = {"total_libraries": 0}
                     stats["content_stats"] = {"total_series": 0}
@@ -765,6 +958,87 @@ class KavitaClient(RestApiMixin):
                 "library_stats": {},
                 "user_stats": {},
                 "server_stats": {},
+                "content_stats": {},
+                "error": str(e),
+            }
+
+    def get_user_count(self) -> int:
+        """Get lightweight user count from database without triggering sync."""
+        try:
+            from app.models import MediaServer, User
+
+            if hasattr(self, "server_id") and self.server_id:
+                count = User.query.filter_by(server_id=self.server_id).count()
+            else:
+                servers = MediaServer.query.filter_by(server_type="kavita").all()
+                if servers:
+                    server_ids = [s.id for s in servers]
+                    count = User.query.filter(User.server_id.in_(server_ids)).count()
+                else:
+                    try:
+                        users = self.get("/api/Users").json()
+                        count = len(users) if isinstance(users, list) else 0
+                    except Exception as api_error:
+                        logging.warning(f"Kavita API fallback failed: {api_error}")
+                        count = 0
+            return count
+        except Exception as e:
+            logging.error(f"Failed to get Kavita user count from database: {e}")
+            return 0
+
+    def get_server_info(self) -> dict:
+        """Get lightweight server information without triggering user sync.
+
+        Uses /api/Server/server-info-slim which returns ServerInfoSlimDto with:
+        - kavitaVersion: Version of Kavita
+        - installId: Unique install identifier
+        - isDocker: Whether running in Docker
+        - firstInstallDate: Initial installation date
+        - firstInstallVersion: Version on first run
+        """
+        try:
+            response = self.get("/api/Server/server-info-slim")
+            response.raise_for_status()
+            server_info = response.json()
+            version = server_info.get("kavitaVersion", "Unknown")
+
+            return {
+                "version": version,
+                "transcoding_sessions": 0,  # Kavita doesn't transcode
+                "active_sessions": 0,  # Kavita doesn't track active sessions
+            }
+        except Exception as e:
+            logging.error(f"Failed to get Kavita server info: {e}")
+            return {
+                "version": "Unknown",
+                "transcoding_sessions": 0,
+                "active_sessions": 0,
+            }
+
+    def get_readonly_statistics(self) -> dict:
+        """Get lightweight statistics without triggering user synchronization."""
+        try:
+            user_count = self.get_user_count()
+            server_info = self.get_server_info()
+
+            return {
+                "user_stats": {
+                    "total_users": user_count,
+                    "active_sessions": server_info.get("active_sessions", 0),
+                },
+                "server_stats": {
+                    "version": server_info.get("version", "Unknown"),
+                    "transcoding_sessions": server_info.get("transcoding_sessions", 0),
+                },
+                "library_stats": {},
+                "content_stats": {},
+            }
+        except Exception as e:
+            logging.error(f"Failed to get Kavita readonly statistics: {e}")
+            return {
+                "user_stats": {"total_users": 0, "active_sessions": 0},
+                "server_stats": {"version": "Unknown", "transcoding_sessions": 0},
+                "library_stats": {},
                 "content_stats": {},
                 "error": str(e),
             }

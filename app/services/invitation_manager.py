@@ -15,12 +15,13 @@ class InvitationManager:
     """Handles invitation processing across multiple media servers."""
 
     @staticmethod
-    def ensure_invitation_identity(code: str, username: str, email: str) -> Identity:
+    def ensure_invitation_identity(
+        code: str, username: str, email: str
+    ) -> Identity | None:
         """Ensure there's a shared Identity for users created from this invitation.
 
         This allows users created from the same invitation code to be pre-linked,
-        even when they don't have valid email addresses that would normally trigger
-        automatic linking.
+        but only for limited invitations OR unlimited invitations with the same email.
 
         Args:
             code: Invitation code
@@ -28,9 +29,42 @@ class InvitationManager:
             email: Email from the invitation form (may be invalid)
 
         Returns:
-            Identity: Shared identity for this invitation
+            Identity: Shared identity for this invitation, or None if no identity should be shared
         """
-        # Check if we already have users for this invitation code
+        # Get the invitation to check its type
+        invitation = Invitation.query.filter_by(code=code).first()
+        if not invitation:
+            return None
+
+        if invitation.unlimited:
+            # For UNLIMITED invitations: only link users with the same EMAIL (same person)
+            if not email or "@" not in email:
+                return None  # No valid email = no identity linking
+
+            # Check if we already have a user with this invitation code AND email
+            existing_user = User.query.filter_by(code=code, email=email).first()
+            if existing_user and existing_user.identity:
+                # Use existing identity for the same email
+                return existing_user.identity
+
+            # Check if there are any users with the same code but different emails
+            other_users = (
+                User.query.filter_by(code=code).filter(User.email != email).first()
+            )
+            if other_users:
+                # Other users exist with different emails - don't link
+                return None
+
+            # Create new identity only if this is the first user or same email
+            identity = Identity(
+                primary_email=email,
+                primary_username=username,
+            )
+            db.session.add(identity)
+            db.session.flush()
+            return identity
+
+        # For LIMITED invitations: always link users with the same code (multi-server for same person)
         existing_user = User.query.filter_by(code=code).first()
 
         if existing_user and existing_user.identity:
@@ -45,7 +79,7 @@ class InvitationManager:
         db.session.add(identity)
         db.session.flush()  # Get the ID immediately
 
-        # If there are existing users for this code without identity, link them
+        # Link existing users for this code (limited invitations only)
         existing_users = User.query.filter_by(code=code).all()
         for user in existing_users:
             if not user.identity_id:
@@ -87,6 +121,7 @@ class InvitationManager:
         )
 
         # Pre-create shared identity for multi-server invitations
+        # Only create if the invitation type supports it (limited invites always, unlimited only with same email)
         if len(servers_to_process) > 1:
             InvitationManager.ensure_invitation_identity(code, username, email)
 
@@ -116,17 +151,39 @@ class InvitationManager:
                     invitation = Invitation.query.filter_by(code=code).first()
                     if invitation:
                         # Find the user that was created for this server
+                        # Flush and commit to ensure we can see the newly created user
+                        db.session.flush()
+                        db.session.commit()
+
                         user = User.query.filter_by(
                             code=code, server_id=server.id
                         ).first()
-                        if user:
-                            invitation.used_by = user  # type: ignore[assignment]
+
+                        # If user not found, log debug info
+                        if not user:
+                            import logging
+
+                            all_users_for_server = User.query.filter_by(
+                                server_id=server.id
+                            ).all()
+                            all_users_with_code = User.query.filter_by(code=code).all()
+                            logging.error(
+                                f"User lookup failed for code={code}, server_id={server.id}. "
+                                f"Server has {len(all_users_for_server)} users, "
+                                f"code has {len(all_users_with_code)} users globally."
+                            )
+                        # Only set used_by for unlimited invites if not already set
+                        # For limited invites, used_by should track the single user
+                        if user and (
+                            not invitation.unlimited or not invitation.used_by
+                        ):
+                            invitation.used_by = user  # type: ignore
                         mark_server_used(invitation, server.id, user)
                 else:
                     errors.append(f"{server.name} ({server.server_type}): {msg}")
 
             except Exception as e:
-                errors.append(f"{server.name} ({server.server_type}): {str(e)}")
+                errors.append(f"{server.name} ({server.server_type}): {e!s}")
 
         # Return results
         if success_count > 0:

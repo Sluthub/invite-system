@@ -1,4 +1,9 @@
 # Wizarr
+
+This is the Sluthub invitations fork, based on Wizarr 2026.9.1. See
+[the Sluthub upgrade guide](docs/sluthub-upgrade.md) for its native deployment and
+the tested migration from the older Nx/Peewee application.
+
 > 🚀 **Development Relaunched:** We're excited to announce that **Wizarr is back in active development**!
 <br></br>
 <p align="center">
@@ -11,12 +16,12 @@
 [![GitHub last commit](https://img.shields.io/github/release-date/wizarrrr/wizarr?style=for-the-badge&logo=github)](https://github.com/wizarrrr/wizarr)
 [![GitHub last release](https://img.shields.io/github/v/release/wizarrrr/wizarr?style=for-the-badge&logo=github)](https://github.com/wizarrrr/wizarr)
 [![GitHub Repo stars](https://img.shields.io/github/stars/wizarrrr/wizarr?style=for-the-badge&logo=github)](https://github.com/wizarrrr/wizarr)
-[![Discord](https://img.shields.io/discord/1020742926856372224?style=for-the-badge&logo=discord)](https://discord.com/invite/mQbyEhWm)
+[![Discord](https://img.shields.io/discord/1020742926856372224?style=for-the-badge&logo=discord)](https://discord.gg/NYxwcjCK9x)
 
 
 ---
 
-Wizarr is an automatic user invitation system for Plex, Jellyfin, and Emby.  
+Wizarr is an automatic user invitation and management system for Plex, Jellyfin, Emby, Audiobookshelf, Romm, Komga and Kavita.
 Create a unique invite link and share it with users — they’ll be automatically added to your media server and guided through downloading apps, accessing request systems, and more!
 
 **The problem**: Inviting your Friends/Family to your Plex server Is complicated and tedious. It's also a hard concept for them to get their head around.
@@ -32,6 +37,7 @@ Create a unique invite link and share it with users — they’ll be automatical
 - Plug-and-play SSO support*
 - Multi-tiered invitation access
 - Time-limited membership options
+- Pre-invite and post-invite wizard steps
 - Setup guide for media apps (like Plex)
 - Request system integration (Overseerr, Ombi, etc.)
 - Discord invite support
@@ -39,63 +45,61 @@ Create a unique invite link and share it with users — they’ll be automatical
 
 ---
 
-## Getting Started
+## 🚀 Getting Started
 
-You can install the stable version of Wizarr by following the instructions below.
+Check out our documentation for how to install and run Wizarr:
 
-```
-docker run -d \
-    --name wizarr \
-    -p 5690:5690 \
-    -v ./wizarr/database:/data/database \
-    ghcr.io/wizarrrr/wizarr:latest
-```
+📚 https://docs.wizarr.dev/getting-started/installation
 
-```
+## 🔧 API Documentation
+
+Wizarr provides a comprehensive REST API for automation and integration with **automatic OpenAPI/Swagger documentation**:
+
+📖 **Interactive API Documentation**: `http://your-wizarr-instance/api/docs/`
+📋 **OpenAPI Specification**: `http://your-wizarr-instance/api/swagger.json`
+
 ---
-services:
-  wizarr:
-    container_name: wizarr
-    image: ghcr.io/wizarrrr/wizarr:latest
-    ports:
-      - 5690:5690
-    volumes:
-      - ./wizarr/database:/data/database
-```
 
-## Documentation
+## Sponsorship
+Thank you to our sponsor for supporting Wizarr development!
 
-Check out our documentation for instructions on how to install and run Wizarr!
-[View Documentation](https://github.com/Wizarrrr/wizarr/blob/master/docs/setup/README.md).
-
-If you encounter any issues please don't hesitate to visit our [Discord](https://discord.gg/XXCz7aM3ak) server and ask for help, we would be happy to help.
-
-<a href="https://discord.gg/XXCz7aM3ak">
-<img alt="Chat on Discord" src="https://img.shields.io/discord/1020742926856372224"/>
+<a href="https://elfhosted.com">
+  <img src="https://store.elfhosted.com/wp-content/uploads/2024/11/logo.svg" height="50" alt="Elfhosted" />
+</a>
+<a href="https://www.kwickflix.tv">
+  <img src=".github/sponsors/kwickflix.tv.png" height="50" alt="kwickflix.tv" />
 </a>
 
 
-## ❤️ Support me
+---
 
-<!--
-Pwease support me >.<
--->  
+## 🌍 Translations
 
-<p>Since I work full-time on open-source projects spread across my organizations, my only source of income is donations from people like you that use & appreciate my stuff. So, if you can spare a dollar or two, I would really appreciate that. All the money goes towards paying rent, essentials like food, drinks etc, and most importantly it will be used to fuel my cookie addiction🍪<br></p>
+We use Weblate to make Wizarr accessible in many languages.
+Want to help translate? Click below!
 
-**Crypto:**
-- **XMR**: `42xc4qPZyfi4wzAkCBXSoMSo3BLDS8946J89JXDqtT5gRj6uYpfhjQF12NLPMxtqGDL2RxoWXjB73iYdBP8DX7SqGvdbdtb`<br>
-- **USDT (TRX20):** `TWg6VDUBase3HDA6RxAwTVjQw4SbxoGyqZ`<br>
-- **USDT (ERC20):** `0x841251438A8Fb2B16298C15B10feA9Fd2cEA3405`<br>
-- **Doge:** `DCKAFtgw6686uEMaFzZfCtUajS9VjPJLMm`<br>
-- **BTC:** `bc1qje8qy7gpudm8hhyx43n9xndg7d8xj5f7dh6m4p`<br>
+<a href="https://hosted.weblate.org/engage/wizarr/">
+<img src="https://hosted.weblate.org/widget/wizarr/wizarr-universal/287x66-grey.png" alt="Translation status" />
+</a>
 
-**Fiat:**
-- **[Patreon](https://patreon.com/crazyco) (Fee: 8%\*)**: ❤️ Account needed, subscription with perks
-- **[ko-fi](https://ko-fi.com/crazyco) (Fee: 2%\*)**: No account needed, subscription or one-time donation
-- **[Wire-transfer](https://bunq.me/ClaraK) (Fee: 0%\*)**: No account needed, one-time donation
-- **[Paypal](https://paypal.me/ClaraCrazy)\*\* (Fee: 2%\*)**: Account needed, one-time donation
+---
 
-\* Fee is calculated by how much I will lose when cashing out<br>
-\*\* Please make sure to select *Friends and Family*<br><br>
-**Thanks for all your support <3**
+## ❤️ Thank You
+
+A big thank you to these amazing contributors who’ve helped build and maintain this project:
+
+<a href="https://github.com/wizarrrr/wizarr/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=wizarrrr/wizarr" />
+</a>
+
+---
+
+## 📸 Screenshots
+
+![Accept Invite](./screenshots/new-accept-plex-invite.png)
+![Home](./screenshots/dashboard.png)
+![Invitations](./screenshots/invitations.png)
+![Settings](./screenshots/edit-servers.png)
+![Users](./screenshots/users.png)
+![Wizarr](./screenshots/wizard.jpeg)
+![Edit Wizard](./screenshots/edit-wizard.png)

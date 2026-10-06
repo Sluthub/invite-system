@@ -1,17 +1,39 @@
+import os
+
+from app.extensions import db
 from app.models import Settings
 
 
 def inject_server_name():
-    # Option A: load the full Settings object
-    setting = Settings.query.filter_by(key="server_name").first()
-    server_name = setting.value if setting else "Wizarr"
+    from sqlalchemy.exc import OperationalError, PendingRollbackError
 
-    # Option B: load just the value column
-    # server_name = (
-    #     db.session
-    #       .query(Settings.value)
-    #       .filter_by(key="server_name")
-    #       .scalar()
-    # ) or "Wizarr"
+    try:
+        # Use no_autoflush to prevent triggering pending session changes
+        with db.session.no_autoflush:
+            setting = Settings.query.filter_by(key="server_name").first()
+            server_name = setting.value if setting else "Sluthub"
+    except (OperationalError, PendingRollbackError) as e:
+        if "database is locked" in str(e).lower():
+            # Fallback to default if database is locked
+            server_name = "Sluthub"
+        else:
+            raise
 
     return {"server_name": server_name}
+
+
+def inject_plus_features():
+    """Inject Plus features availability into template context."""
+    try:
+        import plus
+
+        is_plus_enabled = plus.is_plus_enabled()  # type: ignore
+    except (ImportError, AttributeError):
+        is_plus_enabled = False
+
+    return {"is_plus_enabled": is_plus_enabled}
+
+
+def inject_app_version():
+    """Inject current app version into template context for cache busting."""
+    return {"app_version": os.getenv("APP_VERSION", "dev")}

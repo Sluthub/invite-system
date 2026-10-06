@@ -3,51 +3,87 @@ name: wizarr-release
 on:
     release:
         types: [ published ]
-    workflow_dispatch: { }
+    workflow_dispatch:
+        inputs:
+            version:
+                description: 'Version to build (e.g., v2025.9.1 or latest)'
+                required: false
+                default: 'latest'
 
 env:
     PYTHON_VERSION: '3.12'
     NODE_VERSION: '20'
 
 jobs:
-    # ──────────────────── Docker Release Image ────────────────────
-    release:
-        runs-on: ubuntu-latest
-        # Only run for non-prerelease releases
-        if: ${{ !github.event.release.prerelease }}
+    # ──────────────────── Docker Stable Release ────────────────────
+    stable-release:
+        runs-on: ubuntu-24.04
         permissions:
             contents: read
             packages: write
         
         steps:
-            -   uses: actions/checkout@v4
+            -   uses: actions/checkout@v7
+
+            # ─────── Generate uv.lock for reproducible builds ───────
+            -   name: Set up Python
+                uses: actions/setup-python@v7
+                with:
+                    python-version: ${{ env.PYTHON_VERSION }}
+
+            -   name: Install uv
+                uses: astral-sh/setup-uv@v10.0.1
+
+            -   name: Generate uv.lock
+                run: uv lock
+            
+            -   name: Determine version
+                id: version
+                run: |
+                  if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+                    VERSION="${{ inputs.version }}"
+                    if [[ "$VERSION" == "latest" ]]; then
+                      # Get version from pyproject.toml
+                      VERSION=$(grep '^version = ' pyproject.toml | head -1 | sed 's/version = "\(.*\)"/\1/' || echo "latest")
+                    fi
+                  else
+                    # From release event
+                    VERSION="${{ github.event.release.tag_name }}"
+                  fi
+                  
+                  echo "Building version: $VERSION"
+                  echo "version=$VERSION" >> $GITHUB_OUTPUT
+                  
+                  # Set tag name (with v prefix for non-latest)
+                  if [[ "$VERSION" == "latest" ]]; then
+                    echo "tag_name=latest" >> $GITHUB_OUTPUT
+                  elif [[ "$VERSION" =~ ^v.* ]]; then
+                    echo "tag_name=$VERSION" >> $GITHUB_OUTPUT
+                  else
+                    echo "tag_name=v$VERSION" >> $GITHUB_OUTPUT
+                  fi
 
             -   name: Log in to GHCR
-                uses: docker/login-action@v3
+                uses: docker/login-action@v4
                 with:
                     registry: ghcr.io
                     username: ${{ github.actor }}
                     password: ${{ secrets.GITHUB_TOKEN }}
 
             -   name: Set up QEMU
-                uses: docker/setup-qemu-action@v3
+                uses: docker/setup-qemu-action@v4
 
-            -   name: Set up Buildx
-                uses: docker/setup-buildx-action@v3
-                with:
-                    install: true
+            - name: Set up Docker Buildx
+              uses: docker/setup-buildx-action@v4
 
-            -   name: Build & push multi-arch release image
-                uses: docker/build-push-action@v5
+            -   name: Build & push stable release image
+                uses: docker/build-push-action@v7
                 with:
                     context: .
                     push: true
                     platforms: linux/amd64,linux/arm64
                     tags: |
                         ghcr.io/${{ github.repository_owner }}/wizarr:latest
-                        ghcr.io/${{ github.repository_owner }}/wizarr:beta
-                        ghcr.io/${{ github.repository_owner }}/wizarr:${{ github.event.release.tag_name }}
+                        ghcr.io/${{ github.repository_owner }}/wizarr:${{ steps.version.outputs.tag_name }}
                     build-args: |
-                        APP_VERSION=${{ github.event.release.tag_name }}
-                    cache-from: type=gha
-                    cache-to: type=gha,mode=max
+                        APP_VERSION=${{ steps.version.outputs.version }}

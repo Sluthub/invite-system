@@ -1,12 +1,24 @@
 [Unit]
-Description=Wizarr
-After=network-online.target
+Description=Sluthub invitations
+After=network.target
 
 [Service]
-Type=exec
-ExecStart=/wizarr/scripts/no-docker/start.sh
+Type=simple
+User=user
+Group=user
+WorkingDirectory=/opt/sluthub-invite-system
+Environment=DATABASE_DIR=/opt/sluthub-invite-system/data/database
+Environment=HOST=127.0.0.1
+Environment=PORT=5000
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/opt/sluthub-invite-system/scripts/no-docker/start.sh
 Restart=on-failure
-TimeoutStopSec=300
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/opt/sluthub-invite-system/data/database
 
 [Install]
 WantedBy=multi-user.target

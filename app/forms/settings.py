@@ -13,10 +13,10 @@ class SettingsForm(FlaskForm):
             ("jellyfin", "Jellyfin"),
             ("emby", "Emby"),
             ("audiobookshelf", "Audiobookshelf"),
+            ("drop", "Drop"),
             ("romm", "Romm"),
             ("komga", "Komga"),
             ("kavita", "Kavita"),
-            ("navidrome", "Navidrome"),
         ],
         validators=[DataRequired()],
     )

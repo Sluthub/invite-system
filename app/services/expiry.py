@@ -1,9 +1,13 @@
 import datetime
 import logging
+import time
+from contextlib import suppress
+
+from sqlalchemy.exc import ResourceClosedError
 
 from app.extensions import db
 from app.models import ExpiredUser, Invitation, User, invitation_servers
-from app.services.media.service import delete_user, delete_user_for_server
+from app.services.media.service import delete_user, disable_user
 
 
 def calculate_user_expiry(
@@ -34,7 +38,7 @@ def calculate_user_expiry(
 
     try:
         days = int(invitation.duration)
-        return datetime.datetime.now() + datetime.timedelta(days=days)
+        return datetime.datetime.now(datetime.UTC) + datetime.timedelta(days=days)
     except (ValueError, TypeError):
         logging.warning(
             f"Invalid duration '{invitation.duration}' for invitation {invitation.id}"
@@ -95,7 +99,7 @@ def delete_user_if_expired() -> list[int]:
     This function is multi-server aware and will delete users from their specific
     servers rather than assuming a single global server.
     """
-    now = datetime.datetime.now()
+    now = datetime.datetime.now(datetime.UTC)
     expired_rows = User.query.filter(
         User.expires.is_not(None),  # not null
         User.expires < now,
@@ -103,6 +107,9 @@ def delete_user_if_expired() -> list[int]:
 
     deleted: list[int] = []
     for user in expired_rows:
+        # Use a nested transaction (savepoint) so if deletion fails,
+        # we can rollback the ExpiredUser creation too
+        savepoint = db.session.begin_nested()
         try:
             # Log the user to expired_users table before deletion
             expired_user = ExpiredUser(
@@ -112,27 +119,170 @@ def delete_user_if_expired() -> list[int]:
                 invitation_code=user.code,
                 server_id=user.server_id,
                 expired_at=user.expires,
-                deleted_at=datetime.datetime.now(),
+                deleted_at=datetime.datetime.now(datetime.UTC),
             )
             db.session.add(expired_user)
             db.session.flush()  # Ensure it's saved before we delete the user
 
-            # Use server-specific deletion if user has a server_id
-            if user.server_id and user.server:
-                delete_user_for_server(user.server, user.id)
-            else:
-                # Fallback to the legacy delete_user function
-                delete_user(user.id)
+            # Delete the user (handles server-specific deletion internally)
+            delete_user(user.id, commit=False)
 
             deleted.append(user.id)
             logging.info(
                 "🗑️ Expired user %s (%s) logged and deleted", user.id, user.username
             )
+            savepoint.commit()  # Commit the savepoint on success
+            # Add delay to prevent hammering the media server's database
+            time.sleep(1)
         except Exception as exc:
-            logging.error("Failed to delete expired user %s – %s", user.id, exc)
+            # Rollback the savepoint - this removes the ExpiredUser record
+            # and keeps the User record for retry on next scheduler run
+            with suppress(ResourceClosedError):
+                savepoint.rollback()
+            logging.error(
+                "Failed to delete expired user %s – %s. Will retry on next run.",
+                user.id,
+                exc,
+            )
 
     db.session.commit()
     return deleted
+
+
+def get_server_disable_capabilities() -> dict[str, bool]:
+    """Returns a mapping of server types to whether they support user disabling.
+
+    Returns:
+        dict: Server type -> supports disable (True/False)
+    """
+    return {
+        "jellyfin": True,
+        "emby": True,  # Inherits from Jellyfin
+        "plex": False,  # Only supports deletion via removeFriend()
+        "audiobookshelf": True,
+        "kavita": True,  # Removes library access
+        "komga": True,  # Removes library access
+        "romm": True,
+        "navidrome": False,  # Not supported
+        "drop": False,  # Not supported
+    }
+
+
+def disable_or_delete_user_if_expired() -> list[int]:
+    """
+    Find users whose `expires` < now, and either disable or delete them based on
+    the expiry_action setting. Returns a list of db IDs that were processed.
+
+    This function is multi-server aware and will handle users from their specific
+    servers rather than assuming a single global server.
+    """
+    from app.models import Settings
+
+    # Get the expiry action setting, default to delete for backward compatibility
+    expiry_action_setting = Settings.query.filter_by(key="expiry_action").first()
+    expiry_action = expiry_action_setting.value if expiry_action_setting else "delete"
+
+    now = datetime.datetime.now(datetime.UTC)
+    expired_rows = User.query.filter(
+        User.expires.is_not(None),  # not null
+        User.expires < now,
+        User.is_disabled.is_(False),
+    ).all()
+
+    processed: list[int] = []
+    for user in expired_rows:
+        # Use a nested transaction (savepoint) so if deletion/disabling fails,
+        # we can rollback the ExpiredUser creation too
+        savepoint = db.session.begin_nested()
+        try:
+            # Log the user to expired_users table before processing
+            expired_user = ExpiredUser(
+                original_user_id=user.id,
+                username=user.username,
+                email=user.email,
+                invitation_code=user.code,
+                server_id=user.server_id,
+                expired_at=user.expires,
+                deleted_at=datetime.datetime.now(datetime.UTC),
+            )
+            db.session.add(expired_user)
+            db.session.flush()  # Ensure it's saved before we process the user
+
+            # Determine action based on setting and server capability
+            should_disable = (
+                expiry_action == "disable"
+                and user.server
+                and get_server_disable_capabilities().get(
+                    user.server.server_type, False
+                )
+            )
+
+            if should_disable:
+                # Try to disable the user using the service function
+                try:
+                    if disable_user(user.id, commit=False):
+                        # Successfully disabled the user
+                        user.is_disabled = True
+                        db.session.flush()
+                        processed.append(user.id)
+                        logging.info(
+                            "🔒 Expired user %s (%s) disabled on %s",
+                            user.id,
+                            user.username,
+                            user.server.server_type if user.server else "unknown",
+                        )
+                        savepoint.commit()  # Commit the savepoint on success
+                        # Add delay to prevent hammering the media server's database
+                        time.sleep(1)
+                    else:
+                        # Disable failed, fallback to deletion
+                        raise Exception("Disable operation failed")
+                except Exception as disable_exc:
+                    logging.warning(
+                        "Failed to disable user %s, falling back to deletion: %s",
+                        user.id,
+                        disable_exc,
+                    )
+                    # Fallback to deletion using service function
+                    delete_user(user.id, commit=False)
+                    processed.append(user.id)
+                    logging.info(
+                        "🗑️ Expired user %s (%s) deleted (disable fallback)",
+                        user.id,
+                        user.username,
+                    )
+                    savepoint.commit()  # Commit the savepoint on success
+                    # Add delay to prevent hammering the media server's database
+                    time.sleep(1)
+            else:
+                # Delete the user (either by setting or server doesn't support disable)
+                delete_user(user.id, commit=False)
+                processed.append(user.id)
+                action_reason = (
+                    "setting" if expiry_action == "delete" else "unsupported"
+                )
+                logging.info(
+                    "🗑️ Expired user %s (%s) deleted (%s)",
+                    user.id,
+                    user.username,
+                    action_reason,
+                )
+                savepoint.commit()  # Commit the savepoint on success
+                # Add delay to prevent hammering the media server's database
+                time.sleep(1)
+        except Exception as exc:
+            # Rollback the savepoint - this removes the ExpiredUser record
+            # and keeps the User record for retry on next scheduler run
+            with suppress(ResourceClosedError):
+                savepoint.rollback()
+            logging.error(
+                "Failed to process expired user %s – %s. Will retry on next run.",
+                user.id,
+                exc,
+            )
+
+    db.session.commit()
+    return processed
 
 
 def cleanup_expired_user_by_email(email: str) -> None:
@@ -179,7 +329,7 @@ def get_expiring_this_week_users() -> list[dict]:
     Returns:
         List of dictionaries with user data and calculated days left
     """
-    now = datetime.datetime.now()
+    now = datetime.datetime.now(datetime.UTC)
     one_week_from_now = now + datetime.timedelta(days=7)
 
     users = (
@@ -196,10 +346,14 @@ def get_expiring_this_week_users() -> list[dict]:
     # Add calculated days left to each user
     result = []
     for user in users:
-        days_left = (user.expires - now).total_seconds() / 86400
-        days_left_int = max(
-            1, int(round(days_left))
-        )  # Ensure it's an integer, minimum 1
+        # Ensure user.expires is timezone-aware for comparison
+        # Database stores naive UTC, so add timezone info if missing
+        user_expires = user.expires
+        if user_expires.tzinfo is None:
+            user_expires = user_expires.replace(tzinfo=datetime.UTC)
+
+        days_left = (user_expires - now).total_seconds() / 86400
+        days_left_int = max(1, round(days_left))  # Ensure it's an integer, minimum 1
         result.append(
             {
                 "user": user,

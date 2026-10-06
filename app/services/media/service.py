@@ -5,25 +5,98 @@ operations across different media server types. It acts as a facade that
 dispatches requests to the appropriate media client implementation.
 """
 
+import copy
 import logging
 import re
 from collections import defaultdict
+from time import monotonic
+from typing import Any
 
 from app.extensions import db
 from app.models import Identity, MediaServer, Settings, User
 
 from .client_base import CLIENTS
 
+_NOW_PLAYING_CACHE_TTL = 5.0  # seconds
+_now_playing_cache: dict[str, Any] = {"timestamp": 0.0, "sessions": []}
 
-def _clear_user_cache(client) -> None:
-    """Helper to clear user cache if available."""
-    if hasattr(client, "list_users") and hasattr(client.list_users, "cache_clear"):
-        client.list_users.cache_clear()
+
+def _get_user_identifier(user: User, server: MediaServer) -> str:
+    """Get user identifier for API calls (email for Plex, token for others)."""
+    if server.server_type == "plex":
+        if user.email and user.email != "None":
+            return user.email
+        raise ValueError(f"Plex user {user.id} has no valid email")
+    return user.token
+
+
+def _delete_from_companion_apps(user: User) -> None:
+    """Delete user from connected companion apps (Ombi, Overseerr, etc.)."""
+    try:
+        from app.services.ombi_client import delete_user_from_connections
+
+        connection_results = delete_user_from_connections(user.token)
+
+        for result in connection_results:
+            if result["status"] == "success":
+                logging.info(
+                    f"User {user.username} deleted from {result.get('connection_name')}"
+                )
+            elif result["status"] == "error":
+                logging.warning(
+                    f"Failed to delete from {result.get('connection_name')}: {result.get('message')}"  # noqa: S608  # Logging f-string, not SQL query
+                )
+    except Exception as exc:
+        logging.error(f"Error deleting from companion apps: {exc}")
+
+
+def _set_user_enabled_state(db_id: int, enabled: bool, *, commit: bool = True) -> bool:
+    """Enable or disable a user and save the local state.
+
+    Set ``commit`` to ``False`` when the caller owns the transaction.
+    """
+    if not (user := db.session.get(User, db_id)):
+        logging.error(f"User with id {db_id} not found")
+        return False
+
+    if not user.server:
+        logging.warning(f"User {db_id} has no associated server")
+        return False
+
+    try:
+        client = get_client_for_media_server(user.server)  # type: ignore
+        user_identifier = _get_user_identifier(user, user.server)  # type: ignore
+        method = client.enable_user if enabled else client.disable_user
+        result = method(user_identifier)
+
+        action = "enabled" if enabled else "disabled"
+        if result:
+            user.is_disabled = not enabled
+            if commit:
+                db.session.commit()
+            else:
+                db.session.flush()
+            logging.info(
+                f"Successfully {action} user {user.username} (ID: {db_id}) on {user.server.server_type}"
+            )
+        else:
+            logging.warning(
+                f"Failed to {action} user {user.username} (ID: {db_id}) on {user.server.server_type}"
+            )
+
+        return result
+    except Exception as exc:
+        logging.error(
+            f"Error {'enabling' if enabled else 'disabling'} user {db_id}: {exc}"
+        )
+        return False
 
 
 def _mode() -> str | None:
     """Read the 'server_type' setting from the database."""
-    return db.session.query(Settings.value).filter_by(key="server_type").scalar()
+    return (
+        db.session.query(Settings.value).filter_by(key="server_type").scalar()
+    )  # SQLAlchemy filter_by uses parameterized queries
 
 
 def get_client(
@@ -65,151 +138,343 @@ def get_media_client(server_type: str, media_server: MediaServer | None = None):
     return get_client(server_type)
 
 
-def list_users(clear_cache: bool = False):
+def list_users():
     """Return current users from the configured media server, syncing local DB as needed."""
-    client = get_client(_mode())
-    if clear_cache:
-        _clear_user_cache(client)
-    return client.list_users()
+    return get_client(_mode()).list_users()
 
 
-def list_users_for_server(server: MediaServer, *, clear_cache: bool = False):
-    """List users for a specific MediaServer instance and ensure server_id set."""
-    client = get_client_for_media_server(server)
-    if clear_cache:
-        _clear_user_cache(client)
-
-    users = client.list_users()
-
-    # Ensure server linkage
-    changed = False
-    for user in users:
-        if user.server_id != server.id:
-            user.server_id = server.id
-            changed = True
-
-    if changed:
-        db.session.commit()
-
-    return users
+def list_users_for_server(server: MediaServer):
+    """List users for a specific MediaServer instance."""
+    return get_client_for_media_server(server).list_users()
 
 
-def delete_user(db_id: int) -> None:
-    """Delete a user from its associated MediaServer and local DB."""
-    user = db.session.get(User, db_id)
-    if not user:
+def delete_user(db_id: int, *, commit: bool = True) -> None:
+    """Delete a user from its associated MediaServer and local DB.
+
+    Set ``commit`` to ``False`` when the caller owns the transaction.
+
+    Foreign key relationships are handled automatically by SQLite CASCADE/SET NULL:
+    - activity_session.wizarr_user_id: CASCADE (auto-deleted)
+    - invitation_user.user_id: CASCADE (auto-deleted)
+    - invitation.used_by_id: SET NULL (auto-cleared)
+    """
+    if not (user := db.session.get(User, db_id)):
         return
 
-    server = user.server
-    if server is None:
-        # fallback: derive from token? Skip remote deletion
-        db.session.delete(user)
+    # Delete from LDAP if user is an LDAP user
+    # Only delete from LDAP if this is the last User record with the same username
+    if user.is_ldap_user:
+        try:
+            from app.models import LDAPConfiguration
+
+            # Check if there are other User records with the same username
+            other_users_count = User.query.filter(
+                User.username == user.username, User.is_ldap_user, User.id != user.id
+            ).count()
+
+            # Only delete from LDAP if this is the last user with this username
+            if other_users_count == 0:
+                ldap_config = LDAPConfiguration.query.filter_by(enabled=True).first()
+                if ldap_config:
+                    from app.services.ldap.client import LDAPClient
+
+                    ldap_client = LDAPClient(ldap_config)
+                    user_dn = ldap_client.find_user_dn(user.username)
+                    if not user_dn:
+                        logging.warning(
+                            "LDAP user DN not found for %s, skipping deletion",
+                            user.username,
+                        )
+                    else:
+                        success, message = ldap_client.delete_user(user_dn)
+                        if not success:
+                            logging.error(
+                                "LDAP deletion failed for %s: %s", user_dn, message
+                            )
+                        else:
+                            logging.info("Deleted LDAP user: %s", user_dn)
+        except Exception as exc:
+            logging.error("LDAP deletion error: %s", exc)
+
+    # Delete from remote media server if user has one
+    if user.server:
+        try:
+            client = get_client_for_media_server(user.server)  # type: ignore
+            user_identifier = _get_user_identifier(user, user.server)  # type: ignore
+            client.delete_user(user_identifier)
+        except Exception as exc:
+            logging.error("Remote deletion failed: %s", exc)
+
+    # Delete from companion apps
+    _delete_from_companion_apps(user)
+
+    # Delete the user - SQLite handles all foreign key cascades automatically
+    db.session.delete(user)
+    if commit:
         db.session.commit()
-        return
+    else:
+        db.session.flush()
 
-    # server is guaranteed to be not None at this point
-    assert server is not None
-    # Cast to MediaServer to satisfy type checker
-    from typing import cast
 
-    server = cast(MediaServer, server)
-    client = get_client_for_media_server(server)
+def enable_user(db_id: int, *, commit: bool = True) -> bool:
+    """Enable a user on its associated MediaServer."""
+    return _set_user_enabled_state(db_id, enabled=True, commit=commit)
 
-    # clear cache pre‐removal if supported
-    _clear_user_cache(client)
 
+def disable_user(db_id: int, *, commit: bool = True) -> bool:
+    """Disable a user on its associated MediaServer."""
+    return _set_user_enabled_state(db_id, enabled=False, commit=commit)
+
+
+def remove_user_from_server(user_id: int, server_id: int) -> bool:
+    """Remove a user from a specific server only, preserving other server accounts.
+
+    Args:
+        user_id: The ID of the user record to remove
+        server_id: The ID of the server to remove the user from
+
+    Returns:
+        bool: True if removal was successful, False if user/server not found
+    """
+    user = db.session.get(User, user_id)
+    server = db.session.get(MediaServer, server_id)
+
+    if not user or not server or user.server_id != server_id:
+        return False
+
+    # Remove from remote media server
     try:
-        if server.server_type == "plex":
-            if user.email and user.email != "None":
-                client.delete_user(user.email)
-        else:
-            client.delete_user(user.token)
+        client = get_client_for_media_server(server)
+        user_identifier = _get_user_identifier(user, server)
+        client.delete_user(user_identifier)
     except Exception as exc:
-        # log but still remove locally so UI stays consistent
-        logging.error("Remote deletion failed: %s", exc)
+        logging.error(
+            f"Remote deletion failed for user {user.username} from {server.name}: {exc}"
+        )
 
-    # Delete user from connected companion apps (Ombi, Overseerr, Audiobookrequest, etc.)
-    try:
-        from app.services.ombi_client import delete_user_from_connections
+    # Check if user has other accounts
+    has_other_accounts = (
+        user.identity_id
+        and User.query.filter(
+            User.identity_id == user.identity_id,
+            User.server_id != server_id,
+            User.id != user_id,
+        ).count()
+        > 0
+    )
 
-        connection_results = delete_user_from_connections(user.token)
-
-        # Log companion app deletion results
-        for result in connection_results:
-            if result["status"] == "success":
-                logging.info(
-                    f"User {user.username} deleted from companion app {result.get('connection_name')}"
-                )
-            elif result["status"] == "error":
-                logging.warning(
-                    f"Failed to delete user from {result.get('connection_name')}: {result.get('message')}"
-                )
-    except Exception as exc:
-        logging.error(f"Error deleting user from companion apps: {exc}")
+    # Delete from companion apps only if this is the user's only account
+    if not has_other_accounts:
+        _delete_from_companion_apps(user)
 
     db.session.delete(user)
     db.session.commit()
 
-    _clear_user_cache(client)
+    if has_other_accounts:
+        logging.info(
+            f"Removed user {user.username} from server {server.name}, preserving other accounts"
+        )
+    else:
+        logging.info(
+            f"Removed user {user.username}'s only account from server {server.name}"
+        )
 
-
-def delete_user_for_server(server: MediaServer, db_id: int) -> None:
-    """Delete a user from the given MediaServer and local DB."""
-    client = get_client_for_media_server(server)
-    _clear_user_cache(client)
-
-    user = db.session.get(User, db_id)
-    if user:
-        if server.server_type == "plex":
-            email = user.email
-            if email and email != "None":
-                client.delete_user(email)
-        else:
-            client.delete_user(user.token)
-
-        # Delete user from connected companion apps (Ombi, Overseerr, Audiobookrequest, etc.)
-        try:
-            from app.services.ombi_client import delete_user_from_connections
-
-            connection_results = delete_user_from_connections(user.token)
-
-            # Log companion app deletion results
-            for result in connection_results:
-                if result["status"] == "success":
-                    logging.info(
-                        f"User {user.username} deleted from companion app {result.get('connection_name')}"
-                    )
-                elif result["status"] == "error":
-                    logging.warning(
-                        f"Failed to delete user from {result.get('connection_name')}: {result.get('message')}"
-                    )
-        except Exception as exc:
-            logging.error(f"Error deleting user from companion apps: {exc}")
-
-        db.session.delete(user)
-        db.session.commit()
-
-    _clear_user_cache(client)
+    return True
 
 
 def scan_libraries(
     url: str | None = None, token: str | None = None, server_type: str | None = None
 ):
-    """
-    Fetch available libraries from the media server, given optional credentials or using Settings.
-    Returns a mapping of external_id -> display_name.
+    """Fetch available libraries from the media server using optional credentials.
+
+    This is used for scanning libraries before a server is saved to the database.
+    For saved servers, use scan_libraries_for_server() instead.
     """
     client = get_client(server_type, url, token)
     return client.libraries()
 
 
-def scan_libraries_for_server(server: MediaServer):
-    """Scan libraries for the given server and upsert into our Library table."""
+def scan_libraries_for_server(server: MediaServer) -> tuple[Any, bool]:
+    """Scan libraries for the given server and upsert into our Library table.
+
+    Returns ``(scan_result, authoritative)``. ``authoritative`` reports whether
+    ``scan_result`` can be trusted to reconcile libraries that are missing from
+    it as actually removed - see ``MediaClient.libraries_scan_authoritative``
+    and ``upsert_scanned_libraries``. Callers that only add/update and never
+    reconcile removals (e.g. the API library listing) can ignore it.
+    """
     client = get_client_for_media_server(server)
-    return client.libraries()
+    scan_result = client.libraries()
+    return scan_result, client.libraries_scan_authoritative(scan_result)
 
 
-def get_now_playing_all_servers():
+def upsert_scanned_libraries(
+    server: MediaServer, scan_result: Any, *, authoritative: bool = True
+) -> None:
+    """Reconcile a server's Library rows with a scan result. Does not commit.
+
+    ``scan_result`` is either a ``{external_id: name}`` dict or a list of names.
+    Existing rows keep their primary key (so invites keep referencing them) and
+    their ``enabled`` flag, which is the admin's saved default and what the
+    checkbox partial renders from. New libraries are inserted enabled. A library
+    that vanished from the scan is disabled if any invitation still references it,
+    otherwise deleted, but only when ``authoritative`` is true.
+
+    ``authoritative`` (see ``scan_libraries_for_server``) is the caller's signal
+    that ``scan_result`` genuinely reflects the server's current libraries, not
+    a guess based on counts alone: a same-size scan can still have silently
+    swapped in a different library, and a real removal must not be blocked
+    forever just because it shrinks the count. When it's false, removal
+    reconciliation is skipped entirely; adds and name updates still apply, so
+    genuinely new libraries always show up.
+
+    A malformed ``scan_result`` (e.g. ``None``) is treated the same as an empty
+    one rather than raising, so a bad result from one server in a multi-server
+    scan can't abort reconciliation already done for earlier servers in the
+    same request.
+
+    Shared by the invite modal scan and the server edit-form scan; each caller
+    keeps its own handling of a failed scan and its own commit/flush.
+    """
+    from app.models import Library, invite_libraries
+
+    try:
+        pairs = list(
+            scan_result.items()
+            if isinstance(scan_result, dict)
+            else [(name, name) for name in scan_result]
+        )
+    except TypeError:
+        pairs = []
+
+    # A scan that returns nothing must not mutate anything: Plex's global-id source
+    # can transiently return an empty librarySections list, and trusting it would
+    # disable or delete every real library and wipe the admin's invite defaults.
+    if not pairs:
+        return
+
+    existing_libs = {
+        lib.external_id: lib
+        for lib in Library.query.filter_by(server_id=server.id).all()
+    }
+
+    incoming_ids: set[str] = set()
+    for fid, name in pairs:
+        fid = str(fid)
+        incoming_ids.add(fid)
+        if fid in existing_libs:
+            existing_libs[fid].name = name
+        else:
+            db.session.add(
+                Library(
+                    external_id=fid,
+                    name=name,
+                    server_id=server.id,
+                    enabled=True,
+                )
+            )
+
+    if not authoritative:
+        return
+
+    for ext, lib in existing_libs.items():
+        if str(ext) not in incoming_ids:
+            referenced = db.session.execute(
+                invite_libraries.select().where(invite_libraries.c.library_id == lib.id)
+            ).first()
+            if referenced:
+                lib.enabled = False
+            else:
+                db.session.delete(lib)
+
+
+def reset_user_password(db_id: int, new_password: str) -> bool:
+    """Reset the password for a user on LDAP and/or their associated media server.
+
+    Args:
+        db_id: ID of the User row in our database
+        new_password: The new password to set (already validated for length by caller)
+
+    Returns:
+        bool: True if the password was successfully reset on LDAP or media server, False otherwise
+    """
+    user = db.session.get(User, db_id)
+    if not user:
+        logging.error(f"User with id {db_id} not found")
+        return False
+
+    # Basic safeguard – keep consistent with join rules
+    if not (8 <= len(new_password) <= 128):
+        logging.warning("Password does not meet length requirements")
+        return False
+
+    ldap_success = False
+    media_server_success = False
+
+    # Reset LDAP password if user is an LDAP user
+    # Only reset LDAP password once even if multiple User records share the same username
+    if user.is_ldap_user:
+        try:
+            from app.models import LDAPConfiguration
+
+            ldap_config = LDAPConfiguration.query.filter_by(enabled=True).first()
+            if ldap_config:
+                from app.services.ldap.client import LDAPClient
+
+                ldap_client = LDAPClient(ldap_config)
+                user_dn = ldap_client.find_user_dn(user.username)
+                if not user_dn:
+                    logging.error(
+                        "LDAP user DN not found for %s, cannot reset password",
+                        user.username,
+                    )
+                else:
+                    success, message = ldap_client.change_password(
+                        user_dn, new_password
+                    )
+                    if success:
+                        logging.info(
+                            "Successfully reset LDAP password for %s (user %s, id=%s)",
+                            user_dn,
+                            user.username,
+                            db_id,
+                        )
+                        ldap_success = True
+                    else:
+                        logging.error(
+                            "Failed to reset LDAP password for %s: %s",
+                            user_dn,
+                            message,
+                        )
+        except Exception as exc:
+            logging.error(f"LDAP password reset error: {exc}")
+
+    # Reset media server password if user has an associated server
+    if user.server:
+        try:
+            client = get_client_for_media_server(user.server)
+            user_identifier = _get_user_identifier(user, user.server)
+            result = client.reset_password(user_identifier, new_password)
+
+            if result:
+                logging.info(
+                    f"Successfully reset password for user {user.username} (id={db_id}) on {user.server.name}"
+                )
+                media_server_success = True
+            else:
+                logging.warning(
+                    f"Failed to reset password for user {user.username} (id={db_id}) on {user.server.name}"
+                )
+        except Exception as exc:
+            logging.error(f"Media server password reset error: {exc}")
+
+    # Return True if either LDAP or media server password reset succeeded
+    return ldap_success or media_server_success
+
+
+def get_now_playing_all_servers(
+    *, use_cache: bool = True, cache_ttl: float = _NOW_PLAYING_CACHE_TTL
+):
     """Get now playing status from all configured media servers.
 
     Returns:
@@ -220,6 +485,12 @@ def get_now_playing_all_servers():
               - server_type: Type of media server (plex, jellyfin, etc.)
               - server_id: ID of the MediaServer record
     """
+    if use_cache:
+        now = monotonic()
+        cached_ts = _now_playing_cache.get("timestamp", 0.0)
+        if now - cached_ts <= cache_ttl:
+            return copy.deepcopy(_now_playing_cache.get("sessions", []))
+
     all_sessions = []
 
     # Get all configured media servers
@@ -242,6 +513,11 @@ def get_now_playing_all_servers():
                 f"Failed to get now playing from server {server.name} ({server.server_type}): {exc}"
             )
             continue
+
+    if use_cache:
+        _now_playing_cache["timestamp"] = monotonic()
+        _now_playing_cache["sessions"] = all_sessions
+        return copy.deepcopy(all_sessions)
 
     return all_sessions
 
@@ -289,7 +565,6 @@ def _auto_link_identities():
     one giant pseudo-identity, so we now skip addresses that don't match a
     simple *user@host* pattern.
     """
-
     users = db.session.query(User).filter(User.email.isnot(None)).all()
 
     buckets: dict[str, list[User]] = defaultdict(list)
@@ -317,13 +592,13 @@ def _auto_link_identities():
     db.session.commit()
 
 
-def list_users_all_servers(clear_cache: bool = False):
+def list_users_all_servers():
     """Return users for all servers (mapping server -> list)."""
     _auto_link_identities()
     res = {}
     for server in db.session.query(MediaServer).all():
         try:
-            res[server.id] = list_users_for_server(server, clear_cache=clear_cache)
+            res[server.id] = list_users_for_server(server)
         except Exception:
             res[server.id] = []
     return res

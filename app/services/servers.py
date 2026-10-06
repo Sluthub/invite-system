@@ -6,6 +6,8 @@ from plexapi.exceptions import PlexApiException
 from plexapi.server import PlexServer
 from requests import exceptions as req_exc
 
+from app.services.media.auth_headers import media_browser_auth_headers
+
 
 # Raised when a server returns a non-200 status code.
 class ServerResponseError(Exception):
@@ -67,7 +69,9 @@ def check_plex(url: str, token: str) -> tuple[bool, str]:
 
 
 def check_jellyfin_or_emby_internal(url: str, token: str) -> tuple[bool, str]:
-    resp = requests.get(f"{url}/Users", headers={"X-Emby-Token": token}, timeout=10)
+    resp = requests.get(
+        f"{url}/Users", headers=media_browser_auth_headers(token), timeout=10
+    )
     if resp.status_code != 200:
         raise ServerResponseError(resp.status_code, resp.url)
     return True, ""
@@ -148,12 +152,12 @@ def check_komga(url: str, token: str) -> tuple[bool, str]:
 
     We perform a lightweight GET request to ``/api/v1/libraries`` which is
     available to authenticated users and returns a list of libraries in
-    JSON. When *token* is set we send it as a *Bearer* header.
+    JSON. When *token* is set we send it as an *X-API-Key* header.
     """
     try:
         headers = {"Accept": "application/json"}
         if token:
-            headers["Authorization"] = f"Bearer {token}"
+            headers["X-API-Key"] = token
 
         resp = requests.get(
             f"{url.rstrip('/')}/api/v1/libraries", headers=headers, timeout=10
@@ -246,8 +250,6 @@ def check_navidrome(url: str, token: str) -> tuple[bool, str]:
 
             # Create SHA-256 hash of password + salt (prefer strong hash if supported by Navidrome/Subsonic API)
             token_hash = hashlib.sha256((token + salt).encode()).hexdigest()
-            # If the server requires MD5, revert to MD5 and document the reason:
-            # token_hash = hashlib.md5((token + salt).encode()).hexdigest()  # Protocol-mandated, insecure
 
             params.update(
                 {
@@ -275,3 +277,40 @@ def check_navidrome(url: str, token: str) -> tuple[bool, str]:
         return True, ""
     except Exception as e:
         return handle_connection_error(e, _("Navidrome"))
+
+
+def check_drop(url: str, token: str) -> tuple[bool, str]:
+    """Quick connectivity check for a Drop instance.
+
+    We perform a lightweight request to the ``/api/v1/user`` endpoint to verify
+    the System token has the required permissions for basic API access.
+    """
+    try:
+        # Build request to Drop API
+        headers = {"Accept": "application/json", "Authorization": f"Bearer {token}"}
+
+        # Test connectivity with user endpoint (requires authentication)
+        response = requests.get(
+            f"{url.rstrip('/')}/api/v1/user", headers=headers, timeout=10
+        )
+
+        # Check for successful response
+        if response.status_code == 200:
+            return True, ""
+        if response.status_code == 401:
+            return False, _("Invalid API token or insufficient permissions.")
+        if response.status_code == 403:
+            return False, _("API token lacks required permissions.")
+        response.raise_for_status()
+        return True, ""
+
+    except req_exc.ConnectionError:
+        return False, _("Could not connect to Drop server.")
+    except req_exc.Timeout:
+        return False, _("Connection to Drop server timed out.")
+    except req_exc.HTTPError as e:
+        if e.response.status_code == 404:
+            return False, _("Drop API not found. Check the server URL.")
+        return False, f"Drop API error: {e.response.status_code}"
+    except Exception as e:
+        return handle_connection_error(e, _("Drop"))

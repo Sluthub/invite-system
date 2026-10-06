@@ -2,7 +2,6 @@
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
 
 
 @dataclass(frozen=True)
@@ -26,11 +25,13 @@ class MediaUserDetails:
     created_at: datetime | None = None
     last_active: datetime | None = None
 
+    # Standardized permissions
+    allow_downloads: bool = False
+    allow_live_tv: bool = False
+    allow_camera_upload: bool = False
+
     # Library access - None means "all libraries"
     library_access: list[UserLibraryAccess] | None = None
-
-    # Server-specific policy/configuration data
-    raw_policies: dict[str, Any] | None = None
 
     @property
     def has_library_restrictions(self) -> bool:

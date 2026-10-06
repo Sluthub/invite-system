@@ -1,20 +1,23 @@
 @import 'tailwindcss';
+
 @plugin 'flowbite/plugin';
 @plugin '@tailwindcss/typography';
+
 @source '../../templates/**/*.html';
 @source '../../templates/*.html';
 @source '../node_modules/flowbite/**/*.js';
 @source '../../../wizard_steps/**/*.md';
-@custom-variant dark (&:is(.dark *));
-@theme {
-    --color-primary: #fe4155;
-    --color-primary_hover: #982633;
-    --color-secondary: #533c5b;
-    --color-secondary_hover: #332538;
-    --color-blue-primary: #3b82f6;
-    --color-blue-secondary: #1d4ed8;
-}
 
+@custom-variant dark (&:is(.dark *));
+
+@theme {
+  --color-primary: #fe4155;
+  --color-primary_hover: #982633;
+  --color-secondary: #533c5b;
+  --color-secondary_hover: #332538;
+  --color-blue-primary: #3b82f6;
+  --color-blue-secondary: #1d4ed8;
+}
 
 /*
   The default border color has changed to `currentcolor` in Tailwind CSS v4,
@@ -24,147 +27,457 @@
   If we ever want to remove these styles, we need to add an explicit border
   color utility to any element that depends on these defaults.
 */
-
 @layer base {
-    *,
-     ::after,
-     ::before,
-     ::backdrop,
-     ::file-selector-button {
-        border-color: var(--color-gray-200, currentcolor);
-    }
-}
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: var(--color-gray-200, currentcolor);
+  }
 
+  /* PWA Safe Area Insets - prevent content from overlapping with notches/status bars */
+  body {
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+  }
+
+  /* Apply safe area to fixed mobile header */
+  header.md\:hidden {
+    padding-top: calc(0.625rem + env(safe-area-inset-top));
+  }
+
+  /* Apply safe area to fixed mobile bottom navigation */
+  nav.fixed.bottom-0 {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}
 
 /*
 Set the default cursor for buttons.
 */
-
 button,
 [role="button"] {
-    cursor: pointer;
+  cursor: pointer;
 }
-
 
 /*
 Make sure disabled buttons don't get the pointer cursor.
 */
-
 :disabled {
-    cursor: default;
+  cursor: default;
 }
 
-.btn-nav {
-    @apply inline-flex items-center px-4 py-2 text-sm font-medium bg-white text-gray-500 border border-gray-300 rounded-lg hover: bg-gray-100 hover: text-gray-700 dark: bg-gray-800 dark: border-gray-700 dark: text-gray-400 dark: hover: bg-gray-700 dark: hover: text-white cursor-default;
+.btn-nav{
+  @apply inline-flex items-center px-4 py-2 text-sm font-medium
+         bg-white text-gray-500 border border-gray-300 rounded-lg
+         hover:bg-gray-100 hover:text-gray-700
+         dark:bg-gray-800 dark:border-gray-700 dark:text-gray-400
+         dark:hover:bg-gray-700 dark:hover:text-white cursor-default;
 }
 
 .tab-btn {
-    @apply text-sm font-medium py-2 bg-gray-100 dark: bg-gray-700 rounded-lg hover: bg-gray-200 dark: hover: bg-gray-600 focus: outline-hidden focus: ring-2 focus: ring-primary text-gray-700 dark: text-gray-300;
+  @apply text-sm font-medium py-2 bg-gray-100 dark:bg-gray-700
+         rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600
+         focus:outline-hidden focus:ring-2 focus:ring-primary
+         text-gray-700 dark:text-gray-300;
 }
-
 
 /* Enhanced modal backdrop with blur */
-
 .modal-backdrop {
-    background: rgba(107, 114, 128, 0.75) !important;
-    backdrop-filter: blur(8px) !important;
-    -webkit-backdrop-filter: blur(8px) !important;
-    z-index: 2147483647 !important;
+  background: rgba(107, 114, 128, 0.75) !important;
+  backdrop-filter: blur(8px) !important;
+  -webkit-backdrop-filter: blur(8px) !important;
+  z-index: 2147483647 !important;
 }
-
 
 /* Ensure modals are always on top */
-
 .modal-container {
-    z-index: 2147483647 !important;
-    position: relative !important;
+  z-index: 2147483647 !important;
+  position: relative !important;
 }
-
 
 /* Additional fix for modal overlay issues */
-
-.modal-container>.fixed.inset-0 {
-    z-index: 2147483647 !important;
+.modal-container > .fixed.inset-0 {
+  z-index: 2147483647 !important;
 }
-
 
 /* Force hide all other elements when modal is open */
-
-.modal-container~* {
-    z-index: 1 !important;
+.modal-container ~ * {
+  z-index: 1 !important;
 }
 
-
 /* Mobile modal improvements for better scrolling */
-
 @media (max-width: 768px) {
-    .modal-container .fixed.inset-0 {
-        padding: 1rem 0.5rem;
-        display: flex;
-        align-items: flex-start;
-    }
-    .modal-container .min-h-full {
-        min-height: auto;
-        max-height: calc(100vh - 2rem);
-        width: 100%;
-        margin: 0;
-    }
-    .modal-container .transform {
-        max-height: calc(100vh - 2rem);
-        overflow-y: auto;
-        width: 100%;
-        margin: 0.5rem auto;
-    }
-    /* Ensure modal content scrolls properly on mobile */
-    .modal-container .bg-white {
-        display: flex;
-        flex-direction: column;
-        max-height: inherit;
-    }
-    /* Make form content scrollable if needed */
-    .modal-container .space-y-4,
-    .modal-container .space-y-6 {
-        overflow-y: auto;
-        flex: 1;
-    }
-    /* Ensure action buttons stay at bottom */
-    .modal-container .bg-gray-50 {
-        margin-top: auto;
-        flex-shrink: 0;
-    }
+  .modal-container .fixed.inset-0 {
+    padding: 1rem 0.5rem;
+    display: flex;
+    align-items: flex-start;
+  }
+  
+  .modal-container .min-h-full {
+    min-height: auto;
+    max-height: calc(100vh - 2rem);
+    width: 100%;
+    margin: 0;
+  }
+  
+  .modal-container .transform {
+    max-height: calc(100vh - 2rem);
+    overflow-y: auto;
+    width: 100%;
+    margin: 0.5rem auto;
+  }
+  
+  /* Ensure modal content scrolls properly on mobile */
+  .modal-container .bg-white {
+    display: flex;
+    flex-direction: column;
+    max-height: inherit;
+  }
+  
+  /* Make form content scrollable if needed */
+  .modal-container .space-y-4,
+  .modal-container .space-y-6 {
+    overflow-y: auto;
+    flex: 1;
+  }
+  
+  /* Ensure action buttons stay at bottom */
+  .modal-container .bg-gray-50 {
+    margin-top: auto;
+    flex-shrink: 0;
+  }
 }
 
 #wizard-wrapper.htmx-added {
-    opacity: 0;
+  opacity: 0;
 }
 
-
 /* App-wide scrollbar styling */
-
 ::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
+  width: 8px;
+  height: 8px;
 }
 
 ::-webkit-scrollbar-track {
-    background: transparent;
-    border-radius: 4px;
+  background: transparent;
+  border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb {
-    background: var(--color-primary);
-    border-radius: 4px;
-    transition: background-color 0.2s ease;
+  background: var(--color-primary);
+  border-radius: 4px;
+  transition: background-color 0.2s ease;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-    background: var(--color-primary_hover);
+  background: var(--color-primary_hover);
 }
 
-
 /* Firefox scrollbar styling */
-
 * {
-    scrollbar-width: thin;
-    scrollbar-color: var(--color-primary) transparent;
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-primary) transparent;
+}
+
+/* Fast animations - override animate.css defaults */
+.animate__animated {
+  --animate-duration: 0.3s !important; /* Default was 1s - now 70% faster */
+}
+
+/* Extra fast for critical UI elements */
+.animate__faster {
+  --animate-duration: 0.15s !important; /* Super fast for instant feel */
+}
+
+/* Ultra fast for prefetched content that should appear instantly */
+.animate__fastest {
+  --animate-duration: 0.05s !important; /* Almost instant but still smooth */
+}
+
+/* Keep widget styles outside imported content. */
+@keyframes wizard-media-scroll {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+
+.media-carousel-widget .animate-scroll {
+  animation: wizard-media-scroll 30s linear infinite;
+}
+
+.media-carousel-widget .carousel-container:hover .animate-scroll {
+  animation-play-state: paused;
+}
+
+/* Wizard mobile optimization */
+@media (max-width: 768px) {
+  /* Container must be fixed height on mobile */
+  .wizard-container {
+    position: fixed !important;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    height: 100vh;
+    height: 100dvh; /* Dynamic viewport height for mobile */
+  }
+
+  /* Isolate animations to content area only */
+  .wizard-container > *:not(#wizard-content) {
+    animation: none !important;
+  }
+
+  /* Floating progress bar at top - no background bar */
+  .wizard-progress-mobile {
+    position: fixed;
+    top: 1rem;
+    left: 1rem;
+    right: 1rem;
+    z-index: 50;
+    transition: opacity 0.2s ease;
+  }
+
+  /* Glass morphism container */
+  .wizard-glass-container {
+    background: color-mix(in srgb, rgb(255 255 255) 12%, transparent);
+    backdrop-filter: blur(12px) saturate(180%);
+    -webkit-backdrop-filter: blur(12px) saturate(180%);
+    border-radius: 1.5rem;
+    padding: 0.75rem 1rem;
+    box-shadow:
+      inset 0 0 0 1px rgba(255, 255, 255, 0.15),
+      inset 1.8px 3px 0px -2px rgba(255, 255, 255, 0.5),
+      inset -2px -2px 0px -2px rgba(255, 255, 255, 0.4),
+      0 8px 24px rgba(0, 0, 0, 0.12),
+      0 4px 8px rgba(0, 0, 0, 0.08);
+  }
+
+  .dark .wizard-glass-container {
+    background: color-mix(in srgb, rgb(187 187 188) 12%, transparent);
+    box-shadow:
+      inset 0 0 0 1px rgba(255, 255, 255, 0.08),
+      inset 1.8px 3px 0px -2px rgba(255, 255, 255, 0.15),
+      inset -2px -2px 0px -2px rgba(255, 255, 255, 0.12),
+      0 8px 24px rgba(0, 0, 0, 0.3),
+      0 4px 8px rgba(0, 0, 0, 0.2);
+  }
+
+  /* Prevent flash on load */
+  .wizard-progress-mobile.htmx-swapping {
+    opacity: 1;
+  }
+
+  /* Mobile content styling */
+  .wizard-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8rem 1rem 6rem 1rem; /* Top padding for progress bar + phase badge, bottom for nav buttons */
+    width: 100%;
+    max-width: 100%;
+  }
+
+  /* Floating nav buttons - no background bar */
+  .wizard-nav-mobile {
+    position: fixed;
+    bottom: 2rem;
+    left: 0;
+    right: 0;
+    z-index: 50;
+    display: flex;
+    justify-content: space-between;
+    padding: 0 1rem;
+    transition: opacity 0.2s ease;
+    pointer-events: none; /* Allow clicks through empty space */
+  }
+
+  /* Prevent flash on load */
+  .wizard-nav-mobile.htmx-swapping {
+    opacity: 1;
+  }
+
+  /* Floating circular buttons with glass morphism */
+  .wizard-btn-mobile {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 3.5rem;
+    height: 3.5rem;
+    border-radius: 9999px;
+    background: color-mix(in srgb, rgb(255 255 255) 12%, transparent);
+    backdrop-filter: blur(12px) saturate(180%);
+    -webkit-backdrop-filter: blur(12px) saturate(180%);
+    color: white;
+    box-shadow:
+      inset 0 0 0 1px rgba(255, 255, 255, 0.15),
+      inset 1.8px 3px 0px -2px rgba(255, 255, 255, 0.5),
+      inset -2px -2px 0px -2px rgba(255, 255, 255, 0.4),
+      0 8px 24px rgba(0, 0, 0, 0.12),
+      0 4px 8px rgba(0, 0, 0, 0.08);
+    transition: all 0.2s ease;
+    cursor: pointer;
+    position: relative;
+    z-index: 50;
+    pointer-events: all; /* Re-enable clicks on buttons */
+  }
+
+  /* Light mode: solid primary-colour button so it pops against any light background */
+  html:not(.dark) .wizard-btn-mobile {
+    background: var(--color-primary);
+    color: white;
+    box-shadow:
+      0 4px 12px rgba(0, 0, 0, 0.2),
+      0 2px 4px rgba(0, 0, 0, 0.12);
+  }
+
+  .dark .wizard-btn-mobile {
+    background: color-mix(in srgb, rgb(187 187 188) 12%, transparent);
+    box-shadow:
+      inset 0 0 0 1px rgba(255, 255, 255, 0.08),
+      inset 1.8px 3px 0px -2px rgba(255, 255, 255, 0.15),
+      inset -2px -2px 0px -2px rgba(255, 255, 255, 0.12),
+      0 8px 24px rgba(0, 0, 0, 0.3),
+      0 4px 8px rgba(0, 0, 0, 0.2);
+  }
+
+  .wizard-btn-mobile:active {
+    transform: scale(0.95);
+    box-shadow:
+      inset 0 0 0 1px rgba(255, 255, 255, 0.1),
+      inset 1.8px 3px 0px -2px rgba(255, 255, 255, 0.3),
+      inset -2px -2px 0px -2px rgba(255, 255, 255, 0.25),
+      0 4px 12px rgba(0, 0, 0, 0.15),
+      0 2px 4px rgba(0, 0, 0, 0.1);
+  }
+
+  .wizard-btn-mobile[aria-disabled="true"] {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  /* Position buttons at edges */
+  .wizard-btn-prev {
+    margin-right: auto;
+  }
+
+  .wizard-btn-next {
+    margin-left: auto;
+  }
+
+  /* Make content scrollable with better touch behavior */
+  .wizard-content-mobile {
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+  }
+
+  /* Additional spacing for phase badges - ensure content doesn't overlap with expanded progress indicator */
+  .wizard-container[data-phase="preview"] .wizard-content,
+  .wizard-container[data-step-phase="pre"] .wizard-content,
+  .wizard-container[data-step-phase="post"] .wizard-content {
+    padding-top: 9rem; /* Extra padding when phase badge is visible */
+  }
+}
+
+/* Desktop wizard styles */
+@media (min-width: 769px) {
+  /* Desktop container - override mobile fixed positioning */
+  .wizard-container {
+    position: relative !important;
+    min-height: 100vh;
+    height: auto !important;
+    display: flex;
+    flex-direction: column;
+    overflow: visible !important;
+  }
+
+  /* Desktop content styling - card in center */
+  .wizard-content {
+    flex: initial;
+    overflow-y: visible;
+    padding: 2rem;
+    max-width: 42rem;
+    width: 100%;
+    background-color: white;
+    border: 1px solid rgb(229 231 235);
+    border-radius: 0.5rem;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+  }
+
+  .dark .wizard-content {
+    background-color: rgb(31 41 55);
+    border-color: rgb(55 65 81);
+  }
+}
+
+/* Wizard Admin - Side-by-side layout for pre/post-invite steps */
+.wizard-steps-container {
+  @apply grid grid-cols-1 md:grid-cols-2 gap-6;
+}
+
+.wizard-category-section {
+  @apply border rounded-lg p-4 bg-white dark:bg-gray-800;
+}
+
+.server-group {
+  @apply mb-4 last:mb-0;
+}
+
+.step-list {
+  @apply space-y-2;
+}
+
+.empty-state {
+  @apply text-center py-8 text-gray-400 dark:text-gray-500;
+}
+
+/* Mobile: Stack vertically */
+@media (max-width: 768px) {
+  .wizard-steps-container {
+    @apply grid-cols-1;
+  }
+}
+
+/* Drag-and-drop visual feedback for wizard steps */
+.sortable-ghost {
+  @apply opacity-50 bg-blue-100 dark:bg-blue-900;
+}
+
+.sortable-chosen {
+  @apply ring-2 ring-blue-500;
+}
+
+.sortable-drag {
+  @apply shadow-lg;
+}
+
+.drag-handle {
+  @apply cursor-move text-gray-400 hover:text-gray-600 dark:hover:text-gray-300;
+}
+
+/* Wizard steps list styling */
+.wizard-steps {
+  @apply bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 divide-y divide-gray-200 dark:divide-gray-700;
+}
+
+.wizard-steps li:not(.empty-state-item) {
+  @apply flex items-center justify-between px-4 py-3 transition-colors hover:bg-gray-50 dark:hover:bg-gray-700;
+}
+
+/* Empty state items should not have hover effects */
+.wizard-steps li.empty-state-item {
+  @apply transition-none;
+}
+
+/* Ensure drag handles are visible and interactive */
+.wizard-steps .drag {
+  @apply cursor-grab active:cursor-grabbing;
+}
+
+.wizard-steps .drag:active {
+  @apply cursor-grabbing;
 }

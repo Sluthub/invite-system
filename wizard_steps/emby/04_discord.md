@@ -3,6 +3,8 @@ title:  "Discord community"
 requires: [discord_id]
 ---
 
+## {{ _("Join our Discord") }}
+
 <iframe src="https://discord.com/widget?id={{ discord_id }}&theme=dark"
         width="350" height="500"
         allowtransparency="true" frameborder="0"

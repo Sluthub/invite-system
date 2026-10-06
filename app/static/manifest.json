@@ -1,7 +1,7 @@
 {
-  "name": "Wizarr",
-  "short_name": "Wizarr",
-  "description": "A simple invitation management system for your media servers",
+  "name": "Sluthub invitations",
+  "short_name": "Sluthub",
+  "description": "Invitations and onboarding for Sluthub",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#1f2937",
@@ -58,5 +58,8 @@
       "purpose": "maskable any"
     }
   ],
-  "categories": ["productivity", "utilities"]
-} 
+  "categories": [
+    "productivity",
+    "utilities"
+  ]
+}

@@ -8,7 +8,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       GH_TOKEN: ${{ secrets.SPONSORS_TOKEN }}
       SPONSOR_LOGIN: "mtthidoteu"
@@ -17,7 +17,7 @@ jobs:
       # -----------------------------------------------------------
       # Grab the source *and* every tag so we can look up the latest.
       # -----------------------------------------------------------
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0           # ← crucial for git describe
 
@@ -55,10 +55,14 @@ jobs:
         shell: bash
         run: |
           git fetch --tags --force                    # no-ops if already present
-          # Prioritize 2025.x.x format over v4.x.x format for latest version
-          tag=$(git tag -l --sort=-version:refname | grep -E '^2[0-9]+\.[0-9]+\.[0-9]+$' | head -n1)
+          # Prioritize v2025.x.x format over older formats for latest version
+          tag=$(git tag -l --sort=-version:refname | grep -E '^v2[0-9]+\.[0-9]+\.[0-9]+$' | head -n1)
           if [ -z "$tag" ]; then
-            # Fallback to v4.x.x format if no 2025.x.x tags found
+            # Fallback to 2025.x.x format (no v prefix) if no v2025.x.x tags found
+            tag=$(git tag -l --sort=-version:refname | grep -E '^2[0-9]+\.[0-9]+\.[0-9]+$' | head -n1)
+          fi
+          if [ -z "$tag" ]; then
+            # Further fallback to v4.x.x format
             tag=$(git tag -l --sort=-version:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n1)
           fi
           if [ -z "$tag" ]; then
