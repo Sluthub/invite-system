@@ -137,6 +137,7 @@ def post_worker_init(worker):
 def worker_exit(server, worker):  # noqa: ARG001
     """Called when a worker exits (crash or graceful shutdown)."""
     print(f"WARNING: Worker {worker.pid} exited (age: {worker.age}s)")
+    _stop_background_services()
 
 
 def worker_abort(worker):
@@ -153,6 +154,21 @@ def worker_abort(worker):
 def on_exit(server):  # noqa: ARG001
     """Called just before the master process exits."""
     print("INFO: Gunicorn master process shutting down")
+    _stop_background_services()
+
+
+def _stop_background_services():
+    """Release process-local activity threads before Python joins executors."""
+    application = getattr(sys.modules.get("run"), "app", None)
+    if application is None:
+        return
+
+    try:
+        from app.activity.tracking import stop_activity_tracking
+
+        stop_activity_tracking(application)
+    except Exception as e:
+        print(f"WARNING: Error stopping activity monitoring: {e}")
 
     # Gracefully shutdown the APScheduler to prevent "cannot schedule new futures" errors
     try:
