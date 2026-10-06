@@ -14,6 +14,7 @@ env:
 
 jobs:
   docker-dev:
+    if: github.repository_owner == 'wizarrrr'
     runs-on: ubuntu-24.04
     permissions:
       contents: read
