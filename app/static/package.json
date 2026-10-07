@@ -10,6 +10,11 @@
   },
   "author": "",
   "license": "ISC",
+  "overrides": {
+    "@tailwindcss/typography": {
+      "postcss-selector-parser": "7.1.6"
+    }
+  },
   "devDependencies": {
     "@tailwindcss/cli": "^4.3.3",
     "@tailwindcss/typography": "^0.5.20",

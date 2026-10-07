@@ -9,6 +9,12 @@ Use Python 3.13 and a supported Node 24 runtime. Install Python dependencies wit
 Compile the bundled translations with
 `uv run --locked --no-dev pybabel compile -d app/translations`.
 
+The static dependency graph overrides Typography's pinned selector parser to
+7.1.6 for its security fix. Parser 7 makes mutation during iteration safe; the
+`astSync`, node removal and selector-construction APIs used by Typography remain
+compatible. Verify the generated CSS against the previous locked graph and run
+the static build before changing this override.
+
 `scripts/no-docker/start.sh` starts the current application on loopback port 5000.
 Set `DATABASE_DIR` to the intended private data directory before importing the
 application. Configuration, sessions and the SQLite database use that directory.
