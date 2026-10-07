@@ -728,6 +728,8 @@ def test_get_server_headers_per_type(app, session, server_type, header_name, exp
 
     with app.app_context():
         headers = ImageProxyService.get_server_headers(server.id, server.url)
+        if server_type == "jellyfin":
+            assert headers["Authorization"] == 'MediaBrowser Token="THE-KEY"'
 
     assert headers.get(header_name) == expected
 

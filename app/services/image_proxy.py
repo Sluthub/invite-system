@@ -422,6 +422,7 @@ class ImageProxyService:
             if server.server_type == "audiobookshelf":
                 headers["Authorization"] = f"Bearer {server.api_key}"
             elif server.server_type == "jellyfin":
+                headers["Authorization"] = f'MediaBrowser Token="{server.api_key}"'
                 headers["X-MediaBrowser-Token"] = server.api_key
             elif server.server_type == "emby":
                 headers["X-Emby-Token"] = server.api_key
