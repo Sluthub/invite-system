@@ -7,6 +7,7 @@ on:
 jobs:
   auto-request-review:
     name: Request Reviews on Pull Request
+    if: github.repository_owner == 'wizarrrr'
     runs-on: ubuntu-latest
     steps:
       - name: Get GitHub App Token
