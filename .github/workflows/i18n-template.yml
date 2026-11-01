@@ -9,15 +9,36 @@ permissions:
   contents: read
 
 jobs:
+  admission:
+    runs-on: ubuntu-24.04
+    permissions: {}
+    if: >-
+      github.actor != 'weblate' &&
+      (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+    outputs:
+      publish: ${{ steps.branch.outputs.publish }}
+    steps:
+      - name: Check the exact default branch
+        id: branch
+        shell: bash
+        env:
+          ACTUAL_REF: ${{ github.ref }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        # Git refs are case-sensitive; GitHub expression equality is not.
+        run: |
+          if [[ "$ACTUAL_REF" == "refs/heads/$DEFAULT_BRANCH" ]]; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          fi
+
   pot:
+    needs: admission
     runs-on: ubuntu-24.04
     permissions:
       contents: write
-    # Publish templates only from the default branch, excluding Weblate updates.
-    if: >-
-      github.actor != 'weblate' &&
-      (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') &&
-      github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    # Only the read-only admission job can authorize default-branch publication.
+    if: needs.admission.result == 'success' && needs.admission.outputs.publish == 'true'
     steps:
       - uses: actions/checkout@v7
 
