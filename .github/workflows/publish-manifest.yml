@@ -8,6 +8,8 @@ on:
 
 jobs:
   build:
+    # The app consumes the upstream feed; forks do not publish a replacement.
+    if: github.repository == 'wizarrrr/wizarr'
     runs-on: ubuntu-24.04
     env:
       GH_TOKEN: ${{ secrets.SPONSORS_TOKEN }}
